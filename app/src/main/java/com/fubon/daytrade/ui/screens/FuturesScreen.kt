@@ -55,6 +55,8 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.fubon.daytrade.data.network.OrderStatus
+import com.fubon.daytrade.data.network.OrderStatusItem
 import com.fubon.daytrade.domain.model.BuySell
 import com.fubon.daytrade.ui.theme.LimitDownBlue
 import com.fubon.daytrade.ui.theme.LimitUpRed
@@ -176,6 +178,13 @@ fun FuturesScreen(
                         color = MaterialTheme.colorScheme.onPrimaryContainer
                     )
                 }
+            }
+        }
+
+        // ── 訂單狀態追蹤列表 ───────────────────────────────
+        if (uiState.orderStatuses.isNotEmpty()) {
+            item {
+                FuturesOrderStatusList(orderStatuses = uiState.orderStatuses)
             }
         }
 
@@ -1093,6 +1102,100 @@ private fun DeadlineReminder() {
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+        }
+    }
+}
+
+// ══════════════════════════════════════════════════════════════
+// 組件：訂單狀態彩色標籤（OrderStatusBadge）
+// 灰=待成交 / 藍=部分成交 / 綠=已成交 / 黃=已取消 / 紅=失敗
+// ══════════════════════════════════════════════════════════════
+
+@Composable
+fun OrderStatusBadge(
+    status: OrderStatus,
+    modifier: Modifier = Modifier
+) {
+    val (backgroundColor, textColor, label) = when (status) {
+        OrderStatus.Pending -> MaterialTheme.colorScheme.surfaceVariant to MaterialTheme.colorScheme.onSurfaceVariant to "待成交"
+        OrderStatus.PartiallyFilled -> LimitDownBlue.copy(alpha = 0.15f) to LimitDownBlue to "部分成交"
+        OrderStatus.Filled -> StockUp.copy(alpha = 0.15f) to StockUp to "已成交"
+        OrderStatus.Cancelled -> androidx.compose.ui.graphics.Color(0xFFFFC107).copy(alpha = 0.15f) to androidx.compose.ui.graphics.Color(0xFFFFC107) to "已取消"
+        OrderStatus.Failed, OrderStatus.Rejected -> LimitUpRed.copy(alpha = 0.15f) to LimitUpRed to "失敗"
+        OrderStatus.Unknown -> MaterialTheme.colorScheme.outline.copy(alpha = 0.3f) to MaterialTheme.colorScheme.outline to "未知"
+    }
+
+    Box(
+        modifier = modifier
+            .background(backgroundColor, RoundedCornerShape(4.dp))
+            .padding(horizontal = 6.dp, vertical = 2.dp)
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Medium,
+            color = textColor
+        )
+    }
+}
+
+// ══════════════════════════════════════════════════════════════
+// 組件：期貨訂單狀態列表（可折疊）
+// ══════════════════════════════════════════════════════════════
+
+@Composable
+private fun FuturesOrderStatusList(
+    orderStatuses: Map<String, OrderStatusItem>,
+    modifier: Modifier = Modifier
+) {
+    if (orderStatuses.isEmpty()) return
+
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+        )
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Text(
+                text = "📋 訂單狀態追蹤",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            orderStatuses.values.takeLast(5).reversed().forEach { item ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "${item.symbol} - ${item.orderId}",
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.Medium
+                        )
+                        if (item.filledQty > 0 || item.totalQty > 0) {
+                            Text(
+                                text = "成交量: ${item.filledQty}/${item.totalQty}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                            )
+                        }
+                        item.message.takeIf { it.isNotBlank() }?.let {
+                            Text(
+                                text = it,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                            )
+                        }
+                    }
+                    OrderStatusBadge(status = item.status)
+                }
+            }
         }
     }
 }

@@ -3,6 +3,9 @@ package com.fubon.daytrade.ui.viewmodel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.fubon.daytrade.data.model.AccountInfo
+import com.fubon.daytrade.data.network.OrderCallbackManager
+import com.fubon.daytrade.data.network.OrderStatus
+import com.fubon.daytrade.data.network.OrderUpdateEvent
 import com.fubon.daytrade.data.network.WebSocketClient
 import com.fubon.daytrade.data.repository.FubonRepository
 import com.fubon.daytrade.domain.model.BuySell
@@ -72,8 +75,21 @@ data class FuturesUiState(
     val isOrderLoading: Boolean = false,
     val orderMessage: String? = null,
 
+    // Order status tracking (orderId -> status)
+    val orderStatuses: Map<String, OrderStatusItem> = emptyMap(),
+
     // Error state
     val errorMessage: String? = null,
+)
+
+/** 期貨訂單狀態追蹤 */
+data class OrderStatusItem(
+    val orderId: String,
+    val status: OrderStatus = OrderStatus.Unknown,
+    val message: String = "",
+    val symbol: String = "",
+    val filledQty: Int = 0,
+    val totalQty: Int = 0
 )
 
 /** 期貨 Tick（與 StockTick 分開，因為期貨報價結構不同）*/
@@ -106,7 +122,44 @@ class FuturesViewModel @Inject constructor(
 
     init {
         loadAccounts()
-        checkMargin()  // 初始化時檢查保證金
+        checkMargin()
+        observeOrderUpdates()
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // Order status updates (from WebSocket via OrderCallbackManager)
+    // ──────────────────────────────────────────────────────────
+
+    private fun observeOrderUpdates() {
+        viewModelScope.launch {
+            OrderCallbackManager.orderUpdatesFlow.collect { event ->
+                handleOrderUpdate(event)
+            }
+        }
+    }
+
+    private fun handleOrderUpdate(event: OrderUpdateEvent) {
+        if (event.orderId.isBlank()) return
+        _uiState.update { state ->
+            val item = OrderStatusItem(
+                orderId = event.orderId,
+                status = event.status,
+                message = event.message,
+                symbol = event.symbol,
+                filledQty = event.filledQty,
+                totalQty = event.totalQty
+            )
+            state.copy(
+                orderStatuses = state.orderStatuses + (event.orderId to item),
+                orderMessage = when (event.status) {
+                    OrderStatus.Filled -> "✅ 期貨訂單已成交: ${event.orderId}"
+                    OrderStatus.PartiallyFilled -> "🔄 期貨訂單部分成交: ${event.orderId} (${event.filledQty}/${event.totalQty})"
+                    OrderStatus.Cancelled -> "ℹ️ 期貨訂單已取消: ${event.orderId}"
+                    OrderStatus.Failed, OrderStatus.Rejected -> "❌ 期貨訂單失敗: ${event.orderId} - ${event.message}"
+                    else -> "📋 期貨訂單更新: ${event.orderId} - ${event.status}"
+                }
+            )
+        }
     }
 
     // ──────────────────────────────────────────────────────────

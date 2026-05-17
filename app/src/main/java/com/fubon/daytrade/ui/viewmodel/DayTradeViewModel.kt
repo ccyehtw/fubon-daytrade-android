@@ -4,6 +4,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.fubon.daytrade.data.model.AccountInfo
 import com.fubon.daytrade.data.network.NetworkResult
+import com.fubon.daytrade.data.network.OrderCallbackManager
+import com.fubon.daytrade.data.network.OrderStatus
+import com.fubon.daytrade.data.network.OrderUpdateEvent
 import com.fubon.daytrade.data.network.WebSocketClient
 import com.fubon.daytrade.data.repository.FubonRepository
 import com.fubon.daytrade.data.repository.RetryHelper
@@ -46,6 +49,9 @@ data class DayTradeUiState(
     val isOrderLoading: Boolean = false,
     val orderMessage: String? = null,
     
+    // Order status tracking (orderId -> status)
+    val orderStatuses: Map<String, DayTradeOrderStatusItem> = emptyMap(),
+    
     // Auto square
     val autoSquareTime: String = "13:20",
     val autoSquareEnabled: Boolean = true,
@@ -54,6 +60,16 @@ data class DayTradeUiState(
     // Error state
     val errorMessage: String? = null,
     val errorState: ErrorState = ErrorState.None
+)
+
+/** 當日沖訂單狀態追蹤 */
+data class DayTradeOrderStatusItem(
+    val orderId: String,
+    val status: OrderStatus = OrderStatus.Unknown,
+    val message: String = "",
+    val symbol: String = "",
+    val filledQty: Int = 0,
+    val totalQty: Int = 0
 )
 
 /**
@@ -102,6 +118,43 @@ class DayTradeViewModel @Inject constructor(
 
     init {
         loadAccounts()
+        observeOrderUpdates()
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // Order status updates (from WebSocket via OrderCallbackManager)
+    // ──────────────────────────────────────────────────────────
+
+    private fun observeOrderUpdates() {
+        viewModelScope.launch {
+            OrderCallbackManager.orderUpdatesFlow.collect { event ->
+                handleOrderUpdate(event)
+            }
+        }
+    }
+
+    private fun handleOrderUpdate(event: OrderUpdateEvent) {
+        if (event.orderId.isBlank()) return
+        _uiState.update { state ->
+            val item = DayTradeOrderStatusItem(
+                orderId = event.orderId,
+                status = event.status,
+                message = event.message,
+                symbol = event.symbol,
+                filledQty = event.filledQty,
+                totalQty = event.totalQty
+            )
+            state.copy(
+                orderStatuses = state.orderStatuses + (event.orderId to item),
+                orderMessage = when (event.status) {
+                    OrderStatus.Filled -> "✅ 當日沖訂單已成交: ${event.orderId}"
+                    OrderStatus.PartiallyFilled -> "🔄 當日沖訂單部分成交: ${event.orderId} (${event.filledQty}/${event.totalQty})"
+                    OrderStatus.Cancelled -> "ℹ️ 當日沖訂單已取消: ${event.orderId}"
+                    OrderStatus.Failed, OrderStatus.Rejected -> "❌ 當日沖訂單失敗: ${event.orderId} - ${event.message}"
+                    else -> "📋 當日沖訂單更新: ${event.orderId} - ${event.status}"
+                }
+            )
+        }
     }
 
     fun initQuoteScreen() {

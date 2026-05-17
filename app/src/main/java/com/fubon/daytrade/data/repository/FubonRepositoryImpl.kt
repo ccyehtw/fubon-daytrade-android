@@ -5,6 +5,7 @@ import android.content.SharedPreferences
 import androidx.datastore.preferences.preferencesDataStore
 import com.fubon.daytrade.data.model.AccountInfo
 import com.fubon.daytrade.data.network.NetworkResult
+import com.fubon.daytrade.data.network.OrderCallbackManager
 import com.fubon.daytrade.data.network.WebSocketClient
 import com.fubon.daytrade.domain.model.FuturesOrder
 import com.fubon.daytrade.domain.model.Position
@@ -52,6 +53,11 @@ class FubonRepositoryImpl @Inject constructor(
     /** WebSocket 客戶端（單例，全域共享） */
     val wsClient: WebSocketClient by lazy {
         WebSocketClient(baseUrl.replace("http://", "ws://").replace("https://", "wss://") + "/ws")
+    }
+
+    init {
+        // 綁定 WebSocketClient 到 OrderCallbackManager，啟動訂單狀態監聽
+        OrderCallbackManager.bind(wsClient)
     }
 
     private val _accounts = MutableStateFlow<List<AccountInfo>>(emptyList())
