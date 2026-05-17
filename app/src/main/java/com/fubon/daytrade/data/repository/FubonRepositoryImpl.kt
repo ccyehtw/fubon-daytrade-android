@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import androidx.datastore.preferences.preferencesDataStore
 import com.fubon.daytrade.data.model.AccountInfo
+import com.fubon.daytrade.data.network.NetworkResult
 import com.fubon.daytrade.domain.model.FuturesOrder
 import com.fubon.daytrade.domain.model.Position
 import com.fubon.daytrade.domain.model.StockOrder
@@ -33,9 +34,9 @@ class FubonRepositoryImpl @Inject constructor(
 ) : FubonRepository {
 
     private val client = OkHttpClient.Builder()
-        .connectTimeout(30, TimeUnit.SECONDS)
+        .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
-        .writeTimeout(30, TimeUnit.SECONDS)
+        .writeTimeout(15, TimeUnit.SECONDS)
         .build()
 
     private val gson = Gson()
@@ -53,6 +54,25 @@ class FubonRepositoryImpl @Inject constructor(
         certPath: String,
         certPassword: String
     ): Result<List<AccountInfo>> = withContext(Dispatchers.IO) {
+        // Wrap with retry for transient errors
+        val networkResult = RetryHelper.retryTradingOperation {
+            executeLoginRequest(personalId, apiKey, certPath, certPassword)
+        }
+        
+        when (networkResult) {
+            is NetworkResult.Success -> Result.success(networkResult.data)
+            is NetworkResult.Error -> Result.failure(Exception(networkResult.message))
+            is NetworkResult.NetworkError -> Result.failure(Exception("網路連線失敗: ${networkResult.exception.message}"))
+            is NetworkResult.TimeoutError -> Result.failure(Exception("連線逾時，請稍後再試"))
+        }
+    }
+    
+    private suspend fun executeLoginRequest(
+        personalId: String,
+        apiKey: String,
+        certPath: String,
+        certPassword: String
+    ): NetworkResult<List<AccountInfo>> = withContext(Dispatchers.IO) {
         try {
             val requestBody = mapOf(
                 "personal_id" to personalId,
@@ -79,19 +99,25 @@ class FubonRepositoryImpl @Inject constructor(
                                 displayName = it.displayName
                             )
                         } ?: emptyList()
-                        
-                        Result.success(accounts)
+                        NetworkResult.Success(accounts)
                     } else {
-                        Result.failure(Exception(result.message ?: "登入失敗"))
+                        // 401/403 are not retriable - bad credentials
+                        NetworkResult.Error(result.message ?: "登入失敗", response.code())
                     }
                 } else {
-                    Result.failure(Exception("HTTP ${response.code}: ${response.message}"))
+                    // 401/403 not retriable, 429 rate limited not retriable with backoff
+                    if (response.code in listOf(401, 403, 422, 429)) {
+                        NetworkResult.Error("HTTP ${response.code}: ${response.message}", response.code())
+                    } else {
+                        // 500, 502, 503, 504 are retriable
+                        NetworkResult.Error("HTTP ${response.code}: ${response.message}", response.code())
+                    }
                 }
             }
         } catch (e: IOException) {
-            Result.failure(Exception("網路連線失敗: ${e.message}"))
+            NetworkResult.NetworkError(e)
         } catch (e: Exception) {
-            Result.failure(Exception("登入錯誤: ${e.message}"))
+            NetworkResult.Error("登入錯誤: ${e.message}")
         }
     }
 
@@ -118,6 +144,26 @@ class FubonRepositoryImpl @Inject constructor(
         quantity: Int,
         buySell: String
     ): Result<String> = withContext(Dispatchers.IO) {
+        // Wrap with retry for transient errors
+        val networkResult = RetryHelper.retryTradingOperation {
+            executeStockOrderRequest(accountId, symbol, price, quantity, buySell)
+        }
+        
+        when (networkResult) {
+            is NetworkResult.Success -> Result.success(networkResult.data)
+            is NetworkResult.Error -> Result.failure(Exception(networkResult.message))
+            is NetworkResult.NetworkError -> Result.failure(Exception("網路連線失敗: ${networkResult.exception.message}"))
+            is NetworkResult.TimeoutError -> Result.failure(Exception("連線逾時，請稍後再試"))
+        }
+    }
+    
+    private suspend fun executeStockOrderRequest(
+        accountId: String,
+        symbol: String,
+        price: Double?,
+        quantity: Int,
+        buySell: String
+    ): NetworkResult<String> = withContext(Dispatchers.IO) {
         try {
             val requestBody = mapOf(
                 "account_id" to accountId,
@@ -139,18 +185,18 @@ class FubonRepositoryImpl @Inject constructor(
                     val result = gson.fromJson(body, OrderResponse::class.java)
                     
                     if (result.isSuccess) {
-                        Result.success(result.orderId ?: "ORDER_SUCCESS")
+                        NetworkResult.Success(result.orderId ?: "ORDER_SUCCESS")
                     } else {
-                        Result.failure(Exception(result.message ?: "下單失敗"))
+                        NetworkResult.Error(result.message ?: "下單失敗", response.code())
                     }
                 } else {
-                    Result.failure(Exception("HTTP ${response.code}: ${response.message}"))
+                    NetworkResult.Error("HTTP ${response.code}: ${response.message}", response.code())
                 }
             }
         } catch (e: IOException) {
-            Result.failure(Exception("網路連線失敗: ${e.message}"))
+            NetworkResult.NetworkError(e)
         } catch (e: Exception) {
-            Result.failure(Exception("下單錯誤: ${e.message}"))
+            NetworkResult.Error("下單錯誤: ${e.message}")
         }
     }
 
@@ -161,6 +207,26 @@ class FubonRepositoryImpl @Inject constructor(
         quantity: Int,
         buySell: String
     ): Result<String> = withContext(Dispatchers.IO) {
+        // Wrap with retry for transient errors
+        val networkResult = RetryHelper.retryTradingOperation {
+            executeFuturesOrderRequest(accountId, symbol, price, quantity, buySell)
+        }
+        
+        when (networkResult) {
+            is NetworkResult.Success -> Result.success(networkResult.data)
+            is NetworkResult.Error -> Result.failure(Exception(networkResult.message))
+            is NetworkResult.NetworkError -> Result.failure(Exception("網路連線失敗: ${networkResult.exception.message}"))
+            is NetworkResult.TimeoutError -> Result.failure(Exception("連線逾時，請稍後再試"))
+        }
+    }
+    
+    private suspend fun executeFuturesOrderRequest(
+        accountId: String,
+        symbol: String,
+        price: Double?,
+        quantity: Int,
+        buySell: String
+    ): NetworkResult<String> = withContext(Dispatchers.IO) {
         try {
             val requestBody = mapOf(
                 "account_id" to accountId,
@@ -181,18 +247,18 @@ class FubonRepositoryImpl @Inject constructor(
                     val result = gson.fromJson(body, OrderResponse::class.java)
                     
                     if (result.isSuccess) {
-                        Result.success(result.orderId ?: "ORDER_SUCCESS")
+                        NetworkResult.Success(result.orderId ?: "ORDER_SUCCESS")
                     } else {
-                        Result.failure(Exception(result.message ?: "下單失敗"))
+                        NetworkResult.Error(result.message ?: "下單失敗", response.code())
                     }
                 } else {
-                    Result.failure(Exception("HTTP ${response.code}: ${response.message}"))
+                    NetworkResult.Error("HTTP ${response.code}: ${response.message}", response.code())
                 }
             }
         } catch (e: IOException) {
-            Result.failure(Exception("網路連線失敗: ${e.message}"))
+            NetworkResult.NetworkError(e)
         } catch (e: Exception) {
-            Result.failure(Exception("下單錯誤: ${e.message}"))
+            NetworkResult.Error("下單錯誤: ${e.message}")
         }
     }
 

@@ -3,7 +3,9 @@ package com.fubon.daytrade.ui.viewmodel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.fubon.daytrade.data.model.AccountInfo
+import com.fubon.daytrade.data.network.NetworkResult
 import com.fubon.daytrade.data.repository.FubonRepository
+import com.fubon.daytrade.data.repository.RetryHelper
 import com.fubon.daytrade.data.repository.StockTick
 import com.fubon.daytrade.domain.model.BuySell
 import com.fubon.daytrade.domain.model.Position
@@ -42,9 +44,20 @@ data class DayTradeUiState(
     val autoSquareEnabled: Boolean = true,
     val autoSquareStatus: AutoSquareStatus = AutoSquareStatus.Pending,
     
-    // Error
-    val errorMessage: String? = null
+    // Error state
+    val errorMessage: String? = null,
+    val errorState: ErrorState = ErrorState.None
 )
+
+/**
+ * Represents different error states for the UI layer.
+ */
+sealed class ErrorState {
+    data object None : ErrorState()
+    data class NetworkError(val retry: () -> Unit) : ErrorState()
+    data class TimeoutError(val retry: () -> Unit) : ErrorState()
+    data class ApiError(val code: Int?, val message: String, val retry: (() -> Unit)?) : ErrorState()
+}
 
 data class DayTradePosition(
     val symbol: String,
@@ -146,7 +159,7 @@ class DayTradeViewModel @Inject constructor(
         }
 
         viewModelScope.launch {
-            _uiState.update { it.copy(isOrderLoading = true, orderMessage = null) }
+            _uiState.update { it.copy(isOrderLoading = true, orderMessage = null, errorState = ErrorState.None) }
             
             try {
                 val order = StockOrder(
@@ -177,10 +190,23 @@ class DayTradeViewModel @Inject constructor(
                         refreshDayTradePositions()
                     },
                     onFailure = { error ->
+                        // Determine error type and set appropriate state
+                        val errorState = when {
+                            error.message?.contains("網路連線失敗") == true -> {
+                                ErrorState.NetworkError(retry = { placeDayTradeOrder(symbol, price, quantity, buySell) })
+                            }
+                            error.message?.contains("連線逾時") == true -> {
+                                ErrorState.TimeoutError(retry = { placeDayTradeOrder(symbol, price, quantity, buySell) })
+                            }
+                            else -> {
+                                ErrorState.ApiError(code = null, message = error.message ?: "下單失敗", retry = { placeDayTradeOrder(symbol, price, quantity, buySell) })
+                            }
+                        }
                         _uiState.update { 
                             it.copy(
                                 isOrderLoading = false,
-                                errorMessage = "下單失敗: ${error.message}"
+                                errorMessage = error.message,
+                                errorState = errorState
                             ) 
                         }
                     }
@@ -256,7 +282,7 @@ class DayTradeViewModel @Inject constructor(
     }
 
     fun clearError() {
-        _uiState.update { it.copy(errorMessage = null) }
+        _uiState.update { it.copy(errorMessage = null, errorState = ErrorState.None) }
     }
 
     fun clearOrderMessage() {

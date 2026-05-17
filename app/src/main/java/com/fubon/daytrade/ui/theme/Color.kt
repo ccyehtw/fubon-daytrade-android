@@ -12,9 +12,11 @@ val StockUp = Color(0xFFD32F2F)    // 漲 - 紅
 val StockDown = Color(0xFF388E3C)  // 跌 - 綠
 val StockFlat = Color(0xFF9E9E9E)  // 平
 
-// Warning colors
-val WarningRed = Color(0xFFFF0000)
-val WarningRedBackground = Color(0xFFFFEBEE)
+// Error colors
+val error_red = Color(0xFFD32F2F)
+val error_red_background = Color(0xFFFFEBEE)
+val warning_orange = Color(0xFFFF9800)
+val warning_orange_background = Color(0xFFFFF3E0)
 
 // Limit up/down colors
 val LimitUpRed = Color(0xFFD32F2F)
