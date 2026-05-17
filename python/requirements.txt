@@ -1,0 +1,19 @@
+# Fubon DayTrade - Python Service Dependencies
+# Phase 1: Login framework + SDK integration
+
+# 富邦新一代 API SDK
+# fubon-neo-api>=2.2.8
+
+# Web framework
+fastapi>=0.109.0
+
+# ASGI server
+uvicorn[standard]>=0.27.0
+
+# HTTP client (for potential external calls)
+httpx>=0.26.0
+
+# JSON handling
+orjson>=3.9.0
+
+# Note: Install with: pip install -r requirements.txt
