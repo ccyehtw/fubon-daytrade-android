@@ -94,17 +94,7 @@ cd python && uvicorn service:app --host 0.0.0.0 --port 8080
 ## 🔑 富邦 API 設定
 
 ```python
-# 登入方式（請使用您的個金的身分證字號）
-Personal ID : N123127908   # 個人身分證字號
-API Key     : 0586E47E...  # 38位Hex API Key
-Cert Pass   : Nn047556210   # 憑證密碼
-```
 
-**帳號資訊：**
-- 證券：961P / 20125（當日沖銷資格）
-- 期貨：1247180（futopt/15901）
-
----
 
 ## 🏗️ 系統架構
 
