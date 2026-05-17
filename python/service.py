@@ -50,6 +50,18 @@ accounts_cache: List[Dict[str, str]] = []
 # 條件單引擎（單例）
 condition_engine = None
 
+# 當日沖銷服務（單例）
+daytrade_service = None
+
+
+def get_daytrade_service():
+    """延遲初始化 DayTradeService（單例）"""
+    global daytrade_service
+    if daytrade_service is None:
+        from daytrade_service import DayTradeService
+        daytrade_service = DayTradeService()
+    return daytrade_service
+
 
 def get_condition_engine():
     """延遲初始化條件單引擎"""
@@ -103,6 +115,34 @@ class FuturesOptionQuoteRequest(BaseModel):
 
 class FuturesChainRequest(BaseModel):
     symbol: str  # 標的代碼（例: TXO）
+
+
+# ========== 當日沖銷 Request/Response Models ==========
+
+class StockEntryRequest(BaseModel):
+    symbol: str
+    entry_mode: str = "breakdown_buy"   # "breakdown_buy" | "breakout_sell"
+    price: float
+    quantity: int
+    stop_loss_pct: float = 2.0
+    track_levels: int = 1
+    product_type: str = "stock"
+    account_id: str = ""
+    tick_size: float = 0.1
+
+
+class StockExitRequest(BaseModel):
+    symbol: str
+    reason: str = "manual"  # "stop_loss" | "breakout_exit" | "breakdown_exit" | "manual"
+
+
+class StockPriceUpdateRequest(BaseModel):
+    symbol: str
+    current_price: float
+
+
+class StockPnlRequest(BaseModel):
+    prices: Dict[str, float]  # symbol → current_price
 
 
 # ========== 期貨下單 Request/Response Models ==========
@@ -250,6 +290,150 @@ async def login(req: LoginRequest):
 async def get_accounts():
     """Get cached accounts"""
     return {"accounts": accounts_cache}
+
+
+# ══════════════════════════════════════════════════════════════
+# 當日沖銷端點（雙模式建倉/平倉）
+# ══════════════════════════════════════════════════════════════
+
+@app.post("/stock/entry")
+async def stock_entry(req: StockEntryRequest):
+    """
+    股票/期貨建倉（支援雙模式）
+
+    POST /stock/entry
+    Body: {"symbol": "2330", "entry_mode": "breakdown_buy",
+           "price": 605.0, "quantity": 2000, "stop_loss_pct": 2.0,
+           "track_levels": 1, "account_id": "961P/20125", "tick_size": 0.1}
+    """
+    try:
+        svc = get_daytrade_service()
+        result = svc.entry(
+            symbol=req.symbol,
+            entry_mode=req.entry_mode,
+            price=req.price,
+            quantity=req.quantity,
+            stop_loss_pct=req.stop_loss_pct,
+            track_levels=req.track_levels,
+            product_type=req.product_type,
+            account_id=req.account_id,
+            tick_size=req.tick_size,
+        )
+        return result
+    except Exception as e:
+        logger.error(f"/stock/entry error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/stock/exit")
+async def stock_exit(req: StockExitRequest):
+    """
+    股票/期貨平倉
+
+    POST /stock/exit
+    Body: {"symbol": "2330", "reason": "breakout_exit"}
+    """
+    try:
+        svc = get_daytrade_service()
+        result = svc.close_position(req.symbol, reason=req.reason)
+        return result
+    except Exception as e:
+        logger.error(f"/stock/exit error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/stock/position/{symbol}")
+async def stock_position(symbol: str):
+    """
+    查詢特定商品持倉狀態
+
+    GET /stock/position/2330
+    """
+    try:
+        svc = get_daytrade_service()
+        result = svc.get_position(symbol)
+        if result is None:
+            raise HTTPException(status_code=404, detail=f"找不到 {symbol} 持倉")
+        return {"success": True, "position": result}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"/stock/position error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/stock/positions")
+async def stock_positions():
+    """
+    查詢所有未平倉持倉
+
+    GET /stock/positions
+    """
+    try:
+        svc = get_daytrade_service()
+        positions = svc.get_all_positions()
+        return {"success": True, "open_positions": positions, "count": len(positions)}
+    except Exception as e:
+        logger.error(f"/stock/positions error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/stock/price")
+async def stock_price_update(req: StockPriceUpdateRequest):
+    """
+    饋入即時報價（更新持倉的 highest/lowest_since_entry）
+
+    POST /stock/price
+    Body: {"symbol": "2330", "current_price": 610.0}
+    """
+    try:
+        svc = get_daytrade_service()
+        svc.update_price(req.symbol, req.current_price)
+        # 同時檢查是否觸發平倉條件
+        should_close, reason = svc.check_exit(req.symbol, req.current_price)
+        return {
+            "success": True,
+            "symbol": req.symbol,
+            "current_price": req.current_price,
+            "exit_triggered": should_close,
+            "exit_reason": reason,
+        }
+    except Exception as e:
+        logger.error(f"/stock/price error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/stock/pnl")
+async def stock_pnl(req: StockPnlRequest):
+    """
+    計算所有持倉的未實現 + 已實現損益
+
+    POST /stock/pnl
+    Body: {"prices": {"2330": 610.0, "2317": 105.5}}
+    """
+    try:
+        svc = get_daytrade_service()
+        result = svc.calculate_pnl(req.prices)
+        return {"success": True, **result}
+    except Exception as e:
+        logger.error(f"/stock/pnl error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/stock/close_all")
+async def stock_close_all():
+    """
+    手動平掉所有未平倉持倉
+
+    POST /stock/close_all
+    """
+    try:
+        svc = get_daytrade_service()
+        result = svc.auto_close_all(reason="manual")
+        return {"success": True, **result}
+    except Exception as e:
+        logger.error(f"/stock/close_all error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ══════════════════════════════════════════════════════════════

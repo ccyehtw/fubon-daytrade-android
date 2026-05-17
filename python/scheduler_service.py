@@ -180,19 +180,9 @@ class SchedulerService:
             logger.error(f"[Scheduler] 股票自動平倉失敗: {e}")
 
     def _job_futures_auto_square(self):
-        """13:30 期貨自動平倉"""
-        if not self.is_market_open():
-            logger.debug("非交易時段，跳過期貨自動平倉")
-            return
-
-        logger.info("[Scheduler] 執行期貨自動平倉 (13:30)")
-        try:
-            if self._futures_order_module is not None:
-                self._futures_auto_square_impl()
-            else:
-                logger.warning("[Scheduler] futures_order 未注入，跳過")
-        except Exception as e:
-            logger.error(f"[Scheduler] 期貨自動平倉失敗: {e}")
+        """13:30 期貨自動平倉（已停用，由用戶主觀判斷）"""
+        logger.info("[Scheduler] 13:30 期貨自動平倉已停用（由用戶主觀判斷）")
+        return
 
     def _job_limit_up_down_monitor(self):
         """每分鐘執行的漲跌停監控（僅在交易時段）"""
@@ -313,6 +303,7 @@ class SchedulerService:
         # 設定每日定時任務
         schedule.every().day.at("08:30").do(self._job_pre_market_condition_scan)
         schedule.every().day.at("13:20").do(self._job_stock_auto_square)
+        # 13:30 排程保留但已停用（期貨由用戶主觀判斷）
         schedule.every().day.at("13:30").do(self._job_futures_auto_square)
 
         # 每分鐘執行漲跌停監控
