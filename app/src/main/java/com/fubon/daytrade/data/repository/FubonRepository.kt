@@ -2,6 +2,7 @@ package com.fubon.daytrade.data.repository
 
 import com.fubon.daytrade.data.model.AccountInfo
 import com.fubon.daytrade.data.model.LoginResult
+import com.fubon.daytrade.domain.model.Position
 
 interface FubonRepository {
     suspend fun login(
@@ -34,6 +35,10 @@ interface FubonRepository {
     suspend fun subscribeStockPrice(symbol: String): Flow<StockTick>
 
     suspend fun subscribeFuturesPrice(symbol: String): Flow<FuturesTick>
+
+    suspend fun getStockPositions(accountId: String): List<Position>
+
+    suspend fun getFuturesPositions(accountId: String): List<Position>
 }
 
 data class StockTick(
