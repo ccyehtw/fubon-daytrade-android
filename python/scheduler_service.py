@@ -90,6 +90,7 @@ class SchedulerService:
         self._scheduler_thread: Optional[threading.Thread] = None
         self._last_auto_square_result: Optional[AutoSquareResult] = None
         self._status = "idle"  # "idle" | "running"
+        self._auto_square_enabled = False  # 自動平倉開關（預設關閉，需用戶主動開啟）
 
         # 延遲引用，避免循環 import
         self._daytrade_service = None
@@ -111,6 +112,14 @@ class SchedulerService:
 
     def set_limit_up_down_service(self, svc):
         self._limit_up_down_service = svc
+
+    def set_auto_square_enabled(self, enabled: bool):
+        """設定自動平倉開關（建議在 Android UI 提供開關）"""
+        self._auto_square_enabled = enabled
+        logger.info(f"[Scheduler] 自動平倉開關設定為: {enabled}")
+
+    def is_auto_square_enabled(self) -> bool:
+        return self._auto_square_enabled
 
     def set_futures_order_module(self, module):
         self._futures_order_module = module
@@ -162,6 +171,11 @@ class SchedulerService:
         """13:20 股票當日沖自動平倉"""
         if not self.is_market_open():
             logger.debug("非交易時段，跳過股票自動平倉")
+            return
+
+        # 檢查自動平倉開關（預設關閉）
+        if not self._auto_square_enabled:
+            logger.info("[Scheduler] 自動平倉已關閉（_auto_square_enabled=False），跳過")
             return
 
         logger.info("[Scheduler] 執行股票當日沖自動平倉 (13:20)")

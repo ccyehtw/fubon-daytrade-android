@@ -222,17 +222,15 @@ class DayTradeService:
     # ══════════════════════════════════════════════════════════════
 
     def close_position(
-        self, symbol: str, reason: str = "manual"
+        self, symbol: str, reason: str = "manual", account_id: str = ""
     ) -> Dict[str, Any]:
         """
         平倉執行
 
         Args:
-            symbol: 商品代碼
-            reason: 平倉原因（"stop_loss" | "breakout_exit" | "breakdown_exit" | "manual"）
-
-        Returns:
-            dict — 平倉結果
+            symbol:     商品代碼
+            reason:     平倉原因
+            account_id: 帳號（驗證是否與持倉相符，防止他人平倉）
         """
         with self._lock:
             if symbol not in self._positions:
@@ -241,6 +239,10 @@ class DayTradeService:
             pos = self._positions[symbol]
             if pos.status == "closed":
                 return {"success": False, "message": f"{symbol} 已平倉"}
+
+            # 驗證帳號（若提供了 account_id）
+            if account_id and pos.account_id and account_id != pos.account_id:
+                return {"success": False, "message": "帳號不符，拒絕平倉"}
 
         # 決定平倉方向（與進場反向）
         if pos.entry_mode == EntryMode.BREAKDOWN_BUY:

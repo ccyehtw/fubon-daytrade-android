@@ -11,7 +11,7 @@ import os
 from dataclasses import dataclass, asdict
 from typing import Optional, List, Dict, Any
 
-from fastapi import FastAPI, HTTPException, Request, WebSocket
+from fastapi import FastAPI, HTTPException, Request, WebSocket, Header, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -33,7 +33,11 @@ app = FastAPI(title="Fubon DayTrade Service", version="1.1.0")
 
 # CORS 設定：僅允許已知 Android App origins（防止惡意網站盜用認證）
 # 生產環境應設為 app 的實際 origin，開發環境可用 ["http://localhost:*"]
-ALLOWED_ORIGINS = os.environ.get("ALLOWED_ORIGINS", "http://localhost:*,http://10.0.2.2:*,http://127.0.0.1:*").split(",")
+# Fix #8: 過濾空白字串，確保沒有空字串被允許
+_origins_raw = os.environ.get("ALLOWED_ORIGINS", "http://localhost:*,http://10.0.2.2:*,http://127.0.0.1:*")
+ALLOWED_ORIGINS = [o.strip() for o in _origins_raw.split(",") if o.strip()]
+if not ALLOWED_ORIGINS:
+    ALLOWED_ORIGINS = ["http://localhost:*"]  # 安全默认值
 
 app.add_middleware(
     CORSMiddleware,
@@ -48,6 +52,33 @@ sdk: Optional[FubonSDK] = None
 ws_manager: Optional[Any] = None  # WebSocketManager singleton
 accounts_cache: List[Dict[str, str]] = []
 _stock_account = None  # 證券帳戶（登入時快取）
+
+# ──────────────────────────────────────────────────────────────
+# API Key 驗證（Fix #1）
+# ──────────────────────────────────────────────────────────────
+_ALLOWED_API_KEYS: set[str] = set()
+_BACKUP_API_KEY: Optional[str] = None
+
+
+def _load_api_keys():
+    global _ALLOWED_API_KEYS, _BACKUP_API_KEY
+    env_keys = os.environ.get("ALLOWED_API_KEYS", "")
+    if env_keys:
+        _ALLOWED_API_KEYS = {k.strip() for k in env_keys.split(",") if k.strip()}
+    _BACKUP_API_KEY = os.environ.get("BACKUP_API_KEY") or None
+
+
+def verify_api_key(x_api_key: Optional[str] = Header(None)) -> str:
+    """驗證 API Key，開發模式無 key 時直接通過"""
+    if not _ALLOWED_API_KEYS and not _BACKUP_API_KEY:
+        _load_api_keys()
+    if not _ALLOWED_API_KEYS and not _BACKUP_API_KEY:
+        return "dev-mode"
+    if not x_api_key:
+        raise HTTPException(status_code=401, detail="Missing X-API-Key header")
+    if x_api_key in _ALLOWED_API_KEYS or x_api_key == _BACKUP_API_KEY:
+        return x_api_key
+    raise HTTPException(status_code=403, detail="Invalid API Key")
 
 # 條件單引擎（單例）
 condition_engine = None
@@ -154,6 +185,7 @@ class StockEntryRequest(BaseModel):
 
 class StockExitRequest(BaseModel):
     symbol: str
+    account_id: str = ""   # 帳號驗證（防止他人平倉）
     reason: str = "manual"  # "stop_loss" | "breakout_exit" | "breakdown_exit" | "manual"
 
 
@@ -236,7 +268,7 @@ async def sdk_login(personal_id: str, api_key: str, cert_path: str, cert_passwor
         password = cert_password if cert_password else personal_id
         # 登入時不輸出敏感資料，僅記錄「嘗試登入」事件
         masked_pid = personal_id[0] + "***" + personal_id[-2:] if len(personal_id) > 4 else "***"
-        logger.info(f"嘗試登入: personal_id={masked_pid}, api_key={api_key[:8]}..., cert_path={cert_path}")
+        logger.info(f"嘗試登入: personal_id={masked_pid}, api_key=***, cert_path={cert_path}")
         result = sdk.apikey_login(personal_id, api_key, cert_path, password)
         logger.info(f"Login result: {result}")
 
@@ -334,7 +366,7 @@ async def get_accounts():
 # 當日沖銷端點（雙模式建倉/平倉）
 # ══════════════════════════════════════════════════════════════
 
-@app.post("/stock/entry")
+@app.post("/stock/entry", dependencies=[Depends(verify_api_key)])
 async def stock_entry(req: StockEntryRequest):
     """
     股票/期貨建倉（支援雙模式）
@@ -363,7 +395,7 @@ async def stock_entry(req: StockEntryRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/stock/exit")
+@app.post("/stock/exit", dependencies=[Depends(verify_api_key)])
 async def stock_exit(req: StockExitRequest):
     """
     股票/期貨平倉
@@ -373,7 +405,7 @@ async def stock_exit(req: StockExitRequest):
     """
     try:
         svc = get_daytrade_service()
-        result = svc.close_position(req.symbol, reason=req.reason)
+        result = svc.close_position(req.symbol, reason=req.reason, account_id=req.account_id)
         return result
     except Exception as e:
         logger.error(f"/stock/exit error: {e}")
@@ -480,7 +512,7 @@ async def stock_pnl(req: StockPnlRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/stock/close_all")
+@app.post("/stock/close_all", dependencies=[Depends(verify_api_key)])
 async def stock_close_all():
     """
     手動平掉所有未平倉持倉
@@ -555,7 +587,7 @@ async def futures_chain(req: FuturesChainRequest):
 # 期貨下單端點
 # ══════════════════════════════════════════════════════════════
 
-@app.post("/futures/order")
+@app.post("/futures/order", dependencies=[Depends(verify_api_key)])
 async def futures_order(req: FuturesOrderRequest):
     """
     期貨下單（市價/限價 + 雙模式）
@@ -604,7 +636,7 @@ async def futures_order(req: FuturesOrderRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/futures/condition/order")
+@app.post("/futures/condition/order", dependencies=[Depends(verify_api_key)])
 async def futures_condition_order(req: FuturesConditionOrderRequest):
     """
     期貨條件單（存 SQLite，由條件單引擎評估觸發）
@@ -630,7 +662,7 @@ async def futures_condition_order(req: FuturesConditionOrderRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/futures/cancel")
+@app.post("/futures/cancel", dependencies=[Depends(verify_api_key)])
 async def futures_cancel(req: CancelOrderRequest):
     """
     取消期貨委託
@@ -707,7 +739,7 @@ async def futures_margin(account_id: str = ""):
 # 條件單引擎端點
 # ══════════════════════════════════════════════════════════════
 
-@app.post("/condition/order")
+@app.post("/condition/order", dependencies=[Depends(verify_api_key)])
 async def condition_order(req: ConditionOrderRequest):
     """
     新增條件單
@@ -760,7 +792,7 @@ async def condition_orders(status: Optional[str] = None):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.delete("/condition/order/{cond_id}")
+@app.delete("/condition/order/{cond_id}", dependencies=[Depends(verify_api_key)])
 async def condition_delete(cond_id: str):
     """
     刪除條件單
@@ -778,7 +810,7 @@ async def condition_delete(cond_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/condition/evaluate")
+@app.post("/condition/evaluate", dependencies=[Depends(verify_api_key)])
 async def condition_evaluate(req: ConditionEvaluateRequest):
     """
     報價推送時呼叫（評估條件單）
@@ -816,7 +848,7 @@ async def condition_evaluate(req: ConditionEvaluateRequest):
 # 排程服務端點 + 報價轉播服務端點
 # ══════════════════════════════════════════════════════════════
 
-@app.post("/scheduler/start")
+@app.post("/scheduler/start", dependencies=[Depends(verify_api_key)])
 async def scheduler_start():
     """
     啟動排程服務
@@ -886,7 +918,7 @@ async def scheduler_start():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/scheduler/stop")
+@app.post("/scheduler/stop", dependencies=[Depends(verify_api_key)])
 async def scheduler_stop():
     """
     停止排程服務
@@ -918,6 +950,7 @@ async def scheduler_status():
         return {
             "status": scheduler_service.status,
             "is_running": scheduler_service._running,
+            "auto_square_enabled": scheduler_service.is_auto_square_enabled(),
         }
     except Exception as e:
         logger.error(f"/scheduler/status error: {e}")
@@ -942,7 +975,7 @@ async def scheduler_auto_square_result():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/scheduler/trigger_now")
+@app.post("/scheduler/trigger_now", dependencies=[Depends(verify_api_key)])
 async def scheduler_trigger_now():
     """
     手動觸發一次自動平倉（測試用）
@@ -956,6 +989,32 @@ async def scheduler_trigger_now():
         return {"success": True, "result": result}
     except Exception as e:
         logger.error(f"/scheduler/trigger_now error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class AutoSquareToggleRequest(BaseModel):
+    enabled: bool
+
+
+@app.post("/scheduler/auto_square_toggle", dependencies=[Depends(verify_api_key)])
+async def scheduler_auto_square_toggle(req: AutoSquareToggleRequest):
+    """
+    開關自動平倉功能（Fix #4）
+
+    POST /scheduler/auto_square_toggle
+    Body: {"enabled": true}
+    建議在 Android UI 提供開關，讓用戶自行決定是否啟用 13:20 自動平倉
+    """
+    try:
+        from scheduler_service import scheduler_service
+        scheduler_service.set_auto_square_enabled(req.enabled)
+        return {
+            "success": True,
+            "auto_square_enabled": req.enabled,
+            "message": f"自動平倉已{'開啟' if req.enabled else '關閉'}"
+        }
+    except Exception as e:
+        logger.error(f"/scheduler/auto_square_toggle error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -1042,7 +1101,7 @@ async def quotes_subscriptions():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/quotes/broadcast")
+@app.post("/quotes/broadcast", dependencies=[Depends(verify_api_key)])
 async def quotes_broadcast_now(req: QuotesBroadcastRequest):
     """手動觸發一次廣播（用於測試）"""
     try:
@@ -1227,7 +1286,7 @@ async def register_notification_token(req: TokenRegisterRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/notification/send")
+@app.post("/notification/send", dependencies=[Depends(verify_api_key)])
 async def send_notification(req: ManualNotificationRequest):
     """
     手動發送通知（管理後台）

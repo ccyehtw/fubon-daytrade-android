@@ -139,23 +139,19 @@ class Position:
     def should_close_long(self, current_price: float) -> bool:
         """
         判斷是否需要平多單（breakdown_buy）
-        條件：現價 >= 平倉觸發價，且不停損
+        條件：現價 >= 平倉觸發價（不停損，因為停損由 check_exit() 先行處理）
         """
         if self.entry_mode != EntryMode.BREAKDOWN_BUY:
             return False
-        if self.is_stop_loss_hit(current_price):
-            return True  # 停損優先
         return current_price >= self.breakout_exit_trigger()
 
     def should_close_short(self, current_price: float) -> bool:
         """
         判斷是否需要平空單（breakout_sell）
-        條件：現價 <= 平倉觸發價，且不停損
+        條件：現價 <= 平倉觸發價（不停損，因為停損由 check_exit() 先行處理）
         """
         if self.entry_mode != EntryMode.BREAKOUT_SELL:
             return False
-        if self.is_stop_loss_hit(current_price):
-            return True  # 停損優先
         return current_price <= self.breakdown_exit_trigger()
 
     def should_close(self, current_price: float) -> bool:
