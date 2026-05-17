@@ -45,6 +45,7 @@ app.add_middleware(
 
 # Global SDK instance
 sdk: Optional[FubonSDK] = None
+ws_manager: Optional[Any] = None  # WebSocketManager singleton
 accounts_cache: List[Dict[str, str]] = []
 _stock_account = None  # 證券帳戶（登入時快取）
 
@@ -62,6 +63,15 @@ def get_daytrade_service():
         from daytrade_service import DayTradeService
         daytrade_service = DayTradeService()
     return daytrade_service
+
+
+def get_ws_manager():
+    """延遲初始化 WebSocketManager（單例）"""
+    global ws_manager
+    if ws_manager is None:
+        from ws_manager import WebSocketManager
+        ws_manager = WebSocketManager()
+    return ws_manager
 
 
 def get_condition_engine():
