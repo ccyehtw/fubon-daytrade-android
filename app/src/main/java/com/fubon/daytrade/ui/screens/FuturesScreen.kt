@@ -881,7 +881,10 @@ private fun FuturesPositionCard(
                 }
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // 現價偏離建倉價警示
+            DeviationWarningTag(position = position)
 
             // 平倉按鈕
             androidx.compose.material3.Button(
@@ -908,6 +911,51 @@ private fun FuturesPositionCard(
                 }
             }
         }
+    }
+}
+
+// ══════════════════════════════════════════════════════════════
+// 組件：現價偏離建倉價警示標籤
+// ══════════════════════════════════════════════════════════════
+
+@Composable
+private fun DeviationWarningTag(position: FuturesPosition) {
+    if (position.avgPrice <= 0 || position.currentPrice <= 0) return
+
+    val deviationPct = ((position.currentPrice - position.avgPrice) / position.avgPrice) * 100
+
+    // 多單：現價 < 均價 × 0.98（偏離 -2% 以上）→ 警示
+    // 空單：現價 > 均價 × 1.02（偏離 +2% 以上）→ 警示
+    val isWarning = when (position.direction) {
+        BuySell.Buy  -> deviationPct < -2.0
+        BuySell.Sell -> deviationPct > 2.0
+    }
+
+    if (!isWarning) return
+
+    val isLoss = when (position.direction) {
+        BuySell.Buy  -> deviationPct < 0
+        BuySell.Sell -> deviationPct > 0
+    }
+
+    val tagColor = if (isLoss) StockDown else StockUp
+    val tagText = when {
+        deviationPct > 0 -> "↑ +${String.format("%.1f", deviationPct)}%"
+        else -> "↓ ${String.format("%.1f", deviationPct)}%"
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(tagColor.copy(alpha = 0.08f), RoundedCornerShape(6.dp))
+            .padding(horizontal = 8.dp, vertical = 4.dp)
+    ) {
+        Text(
+            text = "偏離建倉價 $tagText",
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Medium,
+            color = tagColor
+        )
     }
 }
 
