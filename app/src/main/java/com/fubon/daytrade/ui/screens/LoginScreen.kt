@@ -37,6 +37,13 @@ fun LoginScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
 
+    // 觀測 isLoginSuccess 來觸發跳轉，而非同步檢查 login() 回傳值
+    LaunchedEffect(uiState.isLoginSuccess) {
+        if (uiState.isLoginSuccess) {
+            onLoginSuccess()
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -130,9 +137,10 @@ fun LoginScreen(
 
                 Button(
                     onClick = {
-                        if (viewModel.login()) {
-                            onLoginSuccess()
-                        }
+                        // login() 啟動 coroutine 後立即返回 true，
+                        // 因此改為觀測 uiState 變化來判斷登入成功與否，
+                        // 避免 API 還在執行就已經跳轉的問題
+                        viewModel.login()
                     },
                     modifier = Modifier.fillMaxWidth(),
                     enabled = !uiState.isLoading && uiState.isFormValid

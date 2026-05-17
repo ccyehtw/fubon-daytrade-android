@@ -138,11 +138,14 @@ def place_futures_order(
             "status": getattr(order_data, "status", None),
             "message": "下單成功",
         }
-    except NotImplementedError:
-        return _mock_futures_order(account, futures_code, price, quantity, bs)
+    except NotImplementedError as e:
+        logger.error(f"期貨下單不支援: {e}")
+        return {"success": False, "message": f"期貨下單不支援: {e}", "mock": False}
     except Exception as e:
-        logger.error(f"place_futures_order error: {e}")
-        return _mock_futures_order(account, futures_code, price, quantity, bs)
+        logger.error(f"期貨下單發生未預期錯誤: {e}")
+        # 不再自動 fallback 到 mock，改為直接回傳錯誤
+        # 避免 Android 收到假訂單編號而視為成功
+        return {"success": False, "message": f"下單錯誤: {e}", "mock": False}
 
 
 def _mock_futures_order(

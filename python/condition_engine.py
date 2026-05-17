@@ -370,9 +370,13 @@ class ConditionEngine:
             conn.close()
 
             with self._lock:
+                existing_ids = {c.id for c in self._conditions}  # 去重檢查
                 for row in rows:
+                    cond_id = row[0]
+                    if cond_id in existing_ids:
+                        continue  # 跳過已存在的條件單
                     cond = ConditionOrder(
-                        id=row[0],
+                        id=cond_id,
                         symbol=row[1],
                         trigger_price=row[2],
                         trigger_type=row[3],
@@ -385,6 +389,7 @@ class ConditionEngine:
                         order_no=row[10],
                     )
                     self._conditions.append(cond)
+                    existing_ids.add(cond_id)  # 加入已知 ID 集合
             logger.info(f"已自 DB 載入 {len(rows)} 筆條件單")
         except Exception as e:
             logger.error(f"load_from_db error: {e}")

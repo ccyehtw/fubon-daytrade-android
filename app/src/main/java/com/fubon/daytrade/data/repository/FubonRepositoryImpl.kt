@@ -265,9 +265,9 @@ class FubonRepositoryImpl @Inject constructor(
     override suspend fun subscribeStockPrice(symbol: String): Flow<StockTick> {
         val flow = MutableStateFlow<StockTick?>(null)
         
-        // For demo/mock purposes, generate simulated quotes
-        // In production, this would connect to a WebSocket or polling mechanism
-        kotlinx.coroutines.delay(100)
+        // ⚠️ MOCK DATA — 此處為模擬報價，生產環境應替換為真實 WebSocket/Polling
+        // 標記 isMock = true 區分模擬與真實資料，避免混淆
+        val isMockData = true
         
         val basePrice = when (symbol) {
             "2330" -> 1080.0
@@ -301,7 +301,7 @@ class FubonRepositoryImpl @Inject constructor(
     override suspend fun subscribeFuturesPrice(symbol: String): Flow<FuturesTick> {
         val flow = MutableStateFlow<FuturesTick?>(null)
         
-        kotlinx.coroutines.delay(100)
+        // ⚠️ MOCK DATA — 期貨模擬報價，生產環境應替換為真實 API 呼叫
         
         val basePrice = when (symbol) {
             "TXF" -> 18000.0

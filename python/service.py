@@ -31,12 +31,16 @@ logger = logging.getLogger(__name__)
 # FastAPI App
 app = FastAPI(title="Fubon DayTrade Service", version="1.1.0")
 
+# CORS 設定：僅允許已知 Android App origins（防止惡意網站盜用認證）
+# 生產環境應設為 app 的實際 origin，開發環境可用 ["http://localhost:*"]
+ALLOWED_ORIGINS = os.environ.get("ALLOWED_ORIGINS", "http://localhost:*,http://10.0.2.2:*,http://127.0.0.1:*").split(",")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=ALLOWED_ORIGINS,
+    allow_credentials=False,  # False because we use static API Key auth, not Cookie-based
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
 )
 
 # Global SDK instance
@@ -161,7 +165,9 @@ async def sdk_login(personal_id: str, api_key: str, cert_path: str, cert_passwor
     try:
         sdk = FubonSDK()
         password = cert_password if cert_password else personal_id
-        logger.info(f"Attempting login with personal_id={personal_id}, api_key={api_key[:8]}..., cert_path={cert_path}")
+        # 登入時不輸出敏感資料，僅記錄「嘗試登入」事件
+        masked_pid = personal_id[0] + "***" + personal_id[-2:] if len(personal_id) > 4 else "***"
+        logger.info(f"嘗試登入: personal_id={masked_pid}, api_key={api_key[:8]}..., cert_path={cert_path}")
         result = sdk.apikey_login(personal_id, api_key, cert_path, password)
         logger.info(f"Login result: {result}")
 

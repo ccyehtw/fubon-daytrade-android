@@ -70,11 +70,16 @@ class FubonClient:
             logger.info(f"登入成功，帳號: {acct}")
             # 根據帳號格式自動識別證券或期貨帳號
             # 證券格式: 4數字+斜線+英文+數字 (例: 1247180/futopt/15901)
-            # 此處暫以 broker_id 識別，實際以 SDK 回傳為準
+            # 期貨帳號包含 futopt/fut/future 等關鍵字
+            acct_str = str(acct)
+            if "futopt" in acct_str.lower() or "fut" in acct_str.lower() or "future" in acct_str.lower():
+                acct_type = "futures"
+            else:
+                acct_type = "securities"
             self._accounts.append(FubonAccount(
-                id=str(acct),
+                id=acct_str,
                 broker_id="",
-                account_type="securities"
+                account_type=acct_type
             ))
 
         # 預設取第一個帳號為現貨帳號
