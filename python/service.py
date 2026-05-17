@@ -73,6 +73,16 @@ def get_condition_engine():
     return condition_engine
 
 
+def get_quotes_broadcast_service():
+    """延遲初始化 QuotesBroadcastService（單例）"""
+    from quotes_broadcast_service import QuotesBroadcastService
+    qbs = QuotesBroadcastService()
+    qbs.set_ws_manager(get_ws_manager())
+    if sdk:
+        qbs.set_sdk(sdk)
+    return qbs
+
+
 # ========== Data Models ==========
 
 @dataclass
@@ -688,7 +698,7 @@ async def condition_evaluate(req: ConditionEvaluateRequest):
 
 
 # ══════════════════════════════════════════════════════════════
-# 排程服務端點（Phase 4-3）
+# 排程服務端點 + 報價轉播服務端點
 # ══════════════════════════════════════════════════════════════
 
 @app.post("/scheduler/start")
@@ -852,7 +862,105 @@ async def scheduler_limit_up_down_results():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# ========== Main ==========
+# ══════════════════════════════════════════════════════════════
+# 報價轉播 REST API
+# ══════════════════════════════════════════════════════════════
+
+class QuotesSubscribeRequest(BaseModel):
+    symbol: str
+    product_type: str = "stock"   # "stock" | "futures"
+
+
+class QuotesUnsubscribeRequest(BaseModel):
+    symbol: str
+
+
+class QuotesBroadcastRequest(BaseModel):
+    symbol: Optional[str] = None
+
+
+@app.post("/quotes/subscribe")
+async def quotes_subscribe(req: QuotesSubscribeRequest):
+    """
+    訂閱股票/期貨報價
+
+    POST /quotes/subscribe
+    Body: {"symbol": "2330", "product_type": "stock"}
+    """
+    try:
+        qbs = get_quotes_broadcast_service()
+        qbs.add_subscription(req.symbol, product_type=req.product_type)
+        return {
+            "success": True,
+            "message": f"已訂閱 {req.symbol}",
+            "subscriptions": qbs.get_subscriptions(),
+        }
+    except Exception as e:
+        logger.error(f"/quotes/subscribe error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/quotes/unsubscribe")
+async def quotes_unsubscribe(req: QuotesUnsubscribeRequest):
+    """取消訂閱"""
+    try:
+        qbs = get_quotes_broadcast_service()
+        qbs.remove_subscription(req.symbol)
+        return {
+            "success": True,
+            "message": f"已取消訂閱 {req.symbol}",
+            "subscriptions": qbs.get_subscriptions(),
+        }
+    except Exception as e:
+        logger.error(f"/quotes/unsubscribe error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/quotes/subscriptions")
+async def quotes_subscriptions():
+    """查詢目前所有訂閱"""
+    try:
+        qbs = get_quotes_broadcast_service()
+        return {"success": True, "subscriptions": qbs.get_subscriptions()}
+    except Exception as e:
+        logger.error(f"/quotes/subscriptions error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/quotes/broadcast")
+async def quotes_broadcast_now(req: QuotesBroadcastRequest):
+    """手動觸發一次廣播（用於測試）"""
+    try:
+        qbs = get_quotes_broadcast_service()
+        if not req.symbol:
+            return {"success": False, "message": "請提供 symbol"}
+        sym = req.symbol.upper()
+        info = qbs.get_subscriptions().get(sym, {})
+        if info.get("product_type") == "futures":
+            quote = await qbs._fetch_futures_quote(sym)
+        else:
+            quote = await qbs._fetch_stock_quote(sym)
+        if quote and qbs._ws_manager:
+            await qbs._ws_manager.broadcast_quote(sym, quote)
+            return {"success": True, "message": f"{sym} 廣播完成", "quote": quote}
+        return {"success": False, "message": f"{sym} 未訂閱"}
+    except Exception as e:
+        logger.error(f"/quotes/broadcast error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.on_event("startup")
+async def startup_quotes_broadcast():
+    """服務啟動時自動啟動 QuotesBroadcastService"""
+    try:
+        qbs = get_quotes_broadcast_service()
+        qbs.start()
+        logger.info("[Startup] QuotesBroadcastService 已啟動")
+    except Exception as e:
+        logger.warning(f"[Startup] QuotesBroadcastService 啟動失敗: {e}")
+
+
+# ══════════════════════════════════════════════════════════════
 # WebSocket 即時推送端點
 # ══════════════════════════════════════════════════════════════
 
@@ -861,25 +969,33 @@ async def websocket_endpoint(websocket: WebSocket):
     """
     WebSocket 端點 — 接收 Android App 連線
 
-    Android App 可透過此端訂閱即時事件：
-    - order_update: 成交通知
-    - condition_triggered: 條件單觸發
-    - auto_square: 自動平倉
-    - quote_alert: 報價警報
+    支援訊息格式：
+      1. {"event": "ping"} → 回 pong
+      2. {"event": "subscribe", "symbols": ["2330", "TXF"], "topics": ["order_update"]}
+         → 訂閱股票報價 + 事件通知
+      3. {"event": "unsubscribe", "symbols": ["2330"]}
+         → 取消訂閱股票
 
-    客戶端範例（JavaScript）：
-        const ws = new WebSocket("ws://host:port/ws");
-        ws.onmessage = (event) => {
-            const data = JSON.parse(event.data);
-            console.log(data.event, data.data);
-        };
+    推送格式（Server → Client）：
+      {"event": "quote", "data": {...}, "timestamp": "..."}
+      {"event": "order_update", "data": {...}, "timestamp": "..."}
     """
     manager = get_ws_manager()
-    client_id = await manager.connect(websocket)
+
+    # 自動產生 client_id
+    import uuid
+    client_id = str(uuid.uuid4())[:12]
+
+    await manager.connect(client_id, websocket)
 
     try:
+        await websocket.send_json({
+            "event": "connected",
+            "client_id": client_id,
+            "message": "已連線，請發送 subscribe 事件訂閱報價",
+        })
+
         while True:
-            # 接收客戶端訊息（ping/pong 或訂閱控制）
             data = await websocket.receive_text()
             try:
                 msg = json.loads(data)
@@ -890,24 +1006,58 @@ async def websocket_endpoint(websocket: WebSocket):
                         "event": "pong",
                         "timestamp": datetime.now().isoformat(),
                     })
+
                 elif event == "subscribe":
-                    # 客戶端訂閱特定事件（目前廣播已包含所有事件，此處預留）
+                    # 訂閱股票報價 + 事件 topics
+                    symbols = msg.get("symbols", [])
+                    topics = msg.get("topics", [])
+                    manager.subscribe(client_id, symbols=symbols, topics=topics)
+
+                    # 若有訂閱股票，註冊到 QuotesBroadcastService
+                    if symbols:
+                        qbs = get_quotes_broadcast_service()
+                        for sym in symbols:
+                            # 自動判斷是股票還是期貨
+                            prod_type = "futures" if sym.upper().startswith(("TXF", "MXF", "EXF", "FEF", "TXO")) else "stock"
+                            qbs.add_subscription(sym, product_type=prod_type)
+
                     await websocket.send_json({
                         "event": "subscribed",
-                        "topics": msg.get("topics", []),
+                        "symbols": symbols,
+                        "topics": topics,
                     })
+
+                elif event == "unsubscribe":
+                    symbols = msg.get("symbols", [])
+                    manager.unsubscribe(client_id, symbols=symbols)
+
+                    # 從 QuotesBroadcastService 移除（若無其他客戶端訂閱）
+                    if symbols:
+                        qbs = get_quotes_broadcast_service()
+                        for sym in symbols:
+                            qbs.remove_subscription(sym)
+
+                    await websocket.send_json({
+                        "event": "unsubscribed",
+                        "symbols": symbols,
+                    })
+
                 else:
-                    # 回覆收到了
                     await websocket.send_json({
                         "event": "ack",
                         "original_event": event,
                     })
+
             except json.JSONDecodeError:
-                # 非 JSON 訊息，當作 ping 處理
                 if data == "ping":
                     await websocket.send_json({"event": "pong"})
+
     except WebSocketDisconnect:
         await manager.disconnect(client_id)
+        # 移除 QuotesBroadcastService 的訂閱（所有符號）
+        qbs = get_quotes_broadcast_service()
+        for sym in list(qbs.get_subscriptions().keys()):
+            qbs.remove_subscription(sym)
     except Exception as e:
         logger.error(f"WebSocket error for {client_id}: {e}")
         await manager.disconnect(client_id)
