@@ -1,5 +1,9 @@
-# daytrade_service.py — 富邦當日沖銷核心服務
-# 實作自動平倉檢查、損益計算、條件單觸發邏輯
+# daytrade_service.py — 當日沖銷核心服務（雙模式建倉/平倉）
+# 實作：
+#   - 追低點買入（breakdown_buy）→ 追高點回檔平倉
+#   - 追高點回檔賣出（breakout_sell）→ 追低點回檔平倉
+#   - 移動停損追蹤（highest/lowest_since_entry）
+#   - 停損優先於平倉條件
 
 import logging
 import threading
@@ -7,445 +11,459 @@ import time
 from datetime import datetime, time as dt_time
 from typing import Optional, Dict, Any, List, Callable
 
+from position_models import (
+    Position, EntryMode, ProductType,
+    create_position
+)
+
 logger = logging.getLogger(__name__)
 
 # 券商交易時間（台灣）
 TW_SE_OPEN  = dt_time(9, 0)   # 盤前開始
 TW_SE_CLOSE = dt_time(13, 30) # 盤後結束
-AUTO_SQUARING_TIME = dt_time(13, 20) # 自動平倉檢查時間（13:20）
 
 
 class DayTradeService:
     """
-    當日沖銷服務封裝
+    當日沖銷服務（雙模式版）
+
+    核心功能：
+    - entry(symbol, mode, price, qty): 建倉（breakdown_buy 或 breakout_sell）
+    - check_exit(symbol, current_price): 檢查是否觸發平倉條件
+    - auto_close_all(): 手動觸發全部平倉（移動停損 / 收盤前）
+    - get_position(symbol): 取得特定持倉
 
     使用範例:
-        service = DayTradeService(fubon_client)
-        service.start()
-        # ... 執行策略 ...
-        service.stop()
+        svc = DayTradeService(fubon_client)
+
+        # 建倉：追低點買入（多方）
+        pos = svc.entry("2330", EntryMode.BREAKDOWN_BUY,
+                        price=605.0, quantity=2000,
+                        stop_loss_pct=2.0, track_levels=1)
+
+        # 行情饋入：持續更新持倉的 highest/lowest
+        svc.update_price("2330", current_price=610.0)
+
+        # 檢查是否需要平倉
+        should_close, reason = svc.check_exit("2330", current_price=608.0)
+        if should_close:
+            svc.close_position("2330", reason)
+
+        # 平倉（手動 / 移動停損觸發）
+        result = svc.close_position("2330", reason="track_exit")
     """
 
-    def __init__(self, fubon_client, auto_square_time: dt_time = AUTO_SQUARING_TIME):
+    def __init__(self, fubon_client=None):
         """
         Args:
-            fubon_client:   已登入的 FubonClient 實例
-            auto_square_time: 自動平倉檢查時間（預設 13:20）
+            fubon_client: FubonClient 實例（用於實際下單，可為 None 做脫機計算）
         """
         self._client = fubon_client
-        self._auto_square_time = auto_square_time
-        self._running = False
-        self._timer_thread: Optional[threading.Thread] = None
 
-        # 條件單回調
-        self._condition_triggers: List[Dict[str, Any]] = []
+        # 持倉字典 key: symbol → Position
+        self._positions: Dict[str, Position] = {}
 
-        # 當日沖部位的 key: symbol → { buy_qty, sell_qty, avg_buy, avg_sell }
-        self._positions: Dict[str, Dict[str, Any]] = {}
+        # 平倉歷史（用於記錄與回測）
+        self._closed_positions: List[Dict[str, Any]] = []
 
         # 平倉失敗記錄
         self._failed_orders: List[Dict[str, Any]] = []
 
-    # ══════════════════════════════════════════════════════════════
-    # 部位管理
-    # ══════════════════════════════════════════════════════════════
+        # 鎖（執行緒安全）
+        self._lock = threading.Lock()
 
-    def sync_positions(self):
-        """
-        同步富邦帳號內的當日部位
-
-        讀取當日委託單與成交回報，計算各標的目前淨部位
-        """
-        try:
-            orders = self._client.get_today_orders()
-            fills  = self._get_today_fills()
-
-            self._positions.clear()
-
-            # 從委託單計算淨部位
-            for o in orders:
-                sym = o.get("symbol")
-                if not sym:
-                    continue
-                bs  = o.get("buy_sell", "").lower()
-                qty = o.get("quantity", 0)  # 使用成交數量，而非 after_qty（剩餘未成交）
-
-                if sym not in self._positions:
-                    self._positions[sym] = {
-                        "buy_qty": 0, "sell_qty": 0,
-                        "buy_amount": 0.0, "sell_amount": 0.0,
-                        "buy_avg": 0.0, "sell_avg": 0.0,
-                    }
-
-                if "buy" in bs:
-                    self._positions[sym]["buy_qty"] += qty
-                else:
-                    self._positions[sym]["sell_qty"] += qty
-
-            # 從成交補正平均成本
-            for f in fills:
-                sym = f.get("symbol")
-                if not sym or sym not in self._positions:
-                    continue
-                price = float(f.get("price", 0))
-                qty   = int(f.get("quantity", 0))
-
-                if "buy" in f.get("buy_sell", "").lower():
-                    pos = self._positions[sym]
-                    total = pos["buy_amount"] + price * qty
-                    new_qty = pos["buy_qty"] + qty
-                    pos["buy_avg"] = total / new_qty if new_qty else 0
-                    pos["buy_amount"] = total
-                else:
-                    pos = self._positions[sym]
-                    total = pos["sell_amount"] + price * qty
-                    new_qty = pos["sell_qty"] + qty
-                    pos["sell_avg"] = total / new_qty if new_qty else 0
-                    pos["sell_amount"] = total
-
-            logger.info(f"當日部位同步完成，共 {len(self._positions)} 檔")
-            return self._positions
-
-        except Exception as e:
-            logger.error(f"同步部位失敗: {e}")
-            return {}
-
-    def _get_today_fills(self) -> List[Dict[str, Any]]:
-        """讀取當日成交資料（需富邦 SDK 支援 filled_history）"""
-        try:
-            # 富邦 SDK: sdk.stock.filled_history(account, date, date)
-            today = datetime.now().strftime("%Y%m%d")
-            resp = self._client._sdk.stock.filled_history(
-                self._client._stock_account.id, today, today
-            )
-            if resp.is_success:
-                return resp.data
-        except Exception as e:
-            logger.warning(f"讀取成交歷史失敗: {e}")
-        return []
+        logger.info("DayTradeService 初始化完成（雙模式版）")
 
     # ══════════════════════════════════════════════════════════════
-    # 自動平倉檢查（13:20）
+    # 建倉 — entry()
     # ══════════════════════════════════════════════════════════════
 
-    def auto_squaring_check(self) -> Dict[str, Any]:
-        """
-        13:20 自動平倉檢查
-
-        當日沖必須在 13:30 收盤前完成反向沖銷。
-        此方法會自動平掉所有尚未平倉的當日沖部位。
-
-        Returns:
-            dict — 平倉結果統計
-        """
-        now = datetime.now()
-        logger.info(
-            f"[{now.strftime('%Y-%m-%d %H:%M:%S')}] 執行自動平倉檢查"
-        )
-
-        # 先同步最新部位
-        self.sync_positions()
-
-        result = {
-            "time":       now.isoformat(),
-            "total_positions": len(self._positions),
-            "orders_placed":   [],
-            "failed":          [],
-            "summary":         "",
-        }
-
-        for symbol, pos in self._positions.items():
-            buy_qty  = pos.get("buy_qty", 0)
-            sell_qty = pos.get("sell_qty", 0)
-
-            # 計算淨部位（當日沖 = 今日買進並卖出 or 今日賣出並買回）
-            net_qty = buy_qty - sell_qty
-
-            if net_qty == 0:
-                logger.debug(f"{symbol} 淨部位為 0，跳過")
-                continue
-
-            # 決定平倉方向：淨部位 > 0 → 賣出平倉；< 0 → 買入平倉
-            if net_qty > 0:
-                # 今日買超，需賣出 — 使用市價單平倉（非平均成本）
-                close_resp = self._client.place_order(
-                    stock_no=symbol,
-                    price=None,         # 市價
-                    quantity=net_qty,
-                    order_type="market",
-                    buy_sell="sell",
-                )
-            else:
-                # 今日賣超，需買回 — 使用市價單平倉
-                net_qty = abs(net_qty)
-                close_resp = self._client.place_order(
-                    stock_no=symbol,
-                    price=None,         # 市價
-                    quantity=net_qty,
-                    order_type="market",
-                    buy_sell="buy",
-                )
-
-            if close_resp.get("success"):
-                result["orders_placed"].append({
-                    "symbol":   symbol,
-                    "qty":      net_qty,
-                    "price":    close_price,
-                    "order_no": close_resp.get("order_no"),
-                })
-                logger.info(f"自動平倉 {symbol} x {net_qty} @ {close_price}")
-            else:
-                result["failed"].append({
-                    "symbol": symbol,
-                    "reason": close_resp.get("message", "未知錯誤"),
-                })
-                logger.error(f"自動平倉失敗 {symbol}: {close_resp.get('message')}")
-
-        # 組合摘要
-        n = len(result["orders_placed"])
-        f = len(result["failed"])
-        result["summary"] = (
-            f"自動平倉完成：{n} 檔成功，{f} 檔失敗"
-        )
-        logger.info(result["summary"])
-
-        return result
-
-    # ══════════════════════════════════════════════════════════════
-    # 當日沖銷損益計算
-    # ══════════════════════════════════════════════════════════════
-
-    def calculate_profit_loss(self) -> Dict[str, Any]:
-        """
-        計算當日沖銷損益
-
-        計算公式：
-          當日沖銷損益 = Σ[(賣出均價 - 買入均價) × 數量] - 手续费
-
-        Returns:
-            dict — 包含總損益、已平倉、未平倉明細
-        """
-        self.sync_positions()
-
-        realized_pnl  = 0.0   # 已實現
-        unrealized_pnl = 0.0 # 未實現（帳面）
-        detail = []
-
-        for symbol, pos in self._positions.items():
-            buy_qty   = pos.get("buy_qty", 0)
-            sell_qty  = pos.get("sell_qty", 0)
-            buy_avg   = pos.get("buy_avg", 0.0)
-            sell_avg  = pos.get("sell_avg", 0.0)
-
-            # 當日冲：買賣數量相等才視為完成一轮
-            matched = min(buy_qty, sell_qty)
-            remaining_buy  = buy_qty - matched
-            remaining_sell = sell_qty - matched
-
-            pnl = (sell_avg - buy_avg) * matched
-            realized_pnl += pnl
-
-            # 未平倉帳面損益（假設現價 = 成本价）
-            # 若有即時報價，替換 unrealized_price 計算
-            unrealized = 0.0  # 需串接即時報價
-
-            detail.append({
-                "symbol":           symbol,
-                "buy_qty":          buy_qty,
-                "sell_qty":         sell_qty,
-                "buy_avg":          round(buy_avg, 2),
-                "sell_avg":         round(sell_avg, 2),
-                "matched":          matched,
-                "realized_pnl":     round(pnl, 2),
-                "remaining_buy":     remaining_buy,
-                "remaining_sell":   remaining_sell,
-            })
-
-        total_pnl = realized_pnl + unrealized_pnl
-
-        return {
-            "calculated_at": datetime.now().isoformat(),
-            "realized_pnl":  round(realized_pnl, 2),
-            "unrealized_pnl": round(unrealized_pnl, 2),
-            "total_pnl":      round(total_pnl, 2),
-            "positions":      detail,
-            "summary": (
-                f"當日沖總損益: {total_pnl:+.2f} "
-                f"(已實現: {realized_pnl:+.2f}, 未實現: {unrealized_pnl:+.2f})"
-            ),
-        }
-
-    # ══════════════════════════════════════════════════════════════
-    # 條件單觸發邏輯
-    # ══════════════════════════════════════════════════════════════
-
-    ConditionOrder = Dict[str, Any]
-
-    def add_condition_order(
+    def entry(
         self,
         symbol: str,
-        condition_type: str,
-        trigger_price: float,
-        action: str,
+        entry_mode: str,
+        price: float,
         quantity: int,
-        order_price: Optional[float] = None,
-        callback: Optional[Callable] = None,
-    ) -> str:
+        stop_loss_pct: float = 2.0,
+        track_levels: int = 1,
+        product_type: str = "stock",
+        account_id: str = "",
+        order_no: Optional[str] = None,
+        tick_size: float = 0.1,
+    ) -> Dict[str, Any]:
         """
-        新增條件單
+        建倉（支援雙模式）
 
         Args:
-            symbol:        股票代碼
-            condition_type: "above" | "below" | "change_up" | "change_down"
-            trigger_price: 觸發條件價
-            action:        "buy" | "sell"
-            quantity:      委託數量
-            order_price:   委託價格（None = 市價）
-            callback:      觸發後回調函數
+            symbol:        商品代碼（2330 / TXF202506）
+            entry_mode:    "breakdown_buy" | "breakout_sell"
+                           breakdown_buy  → 做多（回檔低點買入）
+                           breakout_sell  → 做空（反彈高點放空）
+            price:         建倉成交價
+            quantity:      張數（股票）或口數（期貨）
+            stop_loss_pct: 停損百分比（預設 2%）
+            track_levels:  追蹤檔位（1~5，預設 1）
+            product_type:  "stock" | "futures"
+            account_id:    帳號識別
+            order_no:      委託書號
+            tick_size:     最小報價單位（股票 0.1，期貨 1.0）
 
         Returns:
-            str — 條件單 ID
+            dict — 建倉結果（position dict）
         """
-        cond_id = f"cond_{symbol}_{int(time.time() * 1000)}"
-        order = {
-            "id":            cond_id,
-            "symbol":        symbol,
-            "condition_type": condition_type,
-            "trigger_price": trigger_price,
-            "action":        action,
-            "quantity":      quantity,
-            "order_price":   order_price,
-            "callback":      callback,
-            "active":        True,
-            "triggered_at":  None,
-        }
-        self._condition_triggers.append(order)
-        logger.info(f"條件單已加入: {cond_id} ({symbol} {condition_type} {trigger_price})")
-        return cond_id
+        mode = EntryMode(entry_mode)
+        prod = ProductType(product_type)
 
-    def condition_order_trigger(
-        self,
-        symbol: str,
-        current_price: float,
-    ) -> Optional[Dict[str, Any]]:
+        with self._lock:
+            # 若已有相同 symbol 的未平倉，先警告
+            if symbol in self._positions:
+                old = self._positions[symbol]
+                if old.status == "open":
+                    logger.warning(
+                        f"{symbol} 已有未平倉持倉（{old.entry_mode.value}），"
+                        f"先平倉再新建倉"
+                    )
+                    self._force_close_position(symbol, reason="re-entry")
+
+            # 建立新持倉
+            pos = create_position(
+                symbol=symbol,
+                product_type=prod,
+                entry_mode=mode,
+                quantity=quantity,
+                entry_price=price,
+                stop_loss_pct=stop_loss_pct,
+                track_levels=track_levels,
+                tick_size=tick_size,
+                account_id=account_id,
+                order_no=order_no,
+            )
+
+            self._positions[symbol] = pos
+
+            logger.info(
+                f"建倉成功: {pos}"
+            )
+
+            return {
+                "success": True,
+                "position": pos.to_dict(),
+                "message": f"{mode.value} 建倉完成 @ {price}",
+            }
+
+    # ══════════════════════════════════════════════════════════════
+    # 行情更新 — update_price()
+    # ══════════════════════════════════════════════════════════════
+
+    def update_price(self, symbol: str, current_price: float) -> None:
         """
-        條件單觸發檢查
+        接收即時報價，更新持倉的價格邊界（highest/lowest_since_entry）
 
-        將即時報價饋入，檢查是否有條件單被觸發。
+        由行情監控服務每秒呼叫
 
         Args:
-            symbol:        股票代碼
+            symbol:        商品代碼
+            current_price: 即時價格
+        """
+        with self._lock:
+            if symbol not in self._positions:
+                return
+            pos = self._positions[symbol]
+            if pos.status != "open":
+                return
+            pos.update_price(current_price)
+
+    # ══════════════════════════════════════════════════════════════
+    # 平倉條件檢查 — check_exit()
+    # ══════════════════════════════════════════════════════════════
+
+    def check_exit(
+        self, symbol: str, current_price: float
+    ) -> tuple[bool, str]:
+        """
+        檢查是否觸發平倉條件
+
+        平倉優先順序：
+        1. 停損觸發（最高優先）
+        2. 移動停損回檔觸發（breakout_exit / breakdown_exit）
+
+        Args:
+            symbol:        商品代碼
             current_price: 即時價格
 
         Returns:
-            dict — 觸發的條件單資訊；若無則回傳 None
+            (should_close: bool, reason: str)
+            reason: "stop_loss" | "breakout_exit" | "breakdown_exit" | ""
         """
-        triggered = None
+        with self._lock:
+            if symbol not in self._positions:
+                return False, ""
 
-        for cond in self._condition_triggers:
-            if not cond.get("active") or cond.get("symbol") != symbol:
-                continue
+            pos = self._positions[symbol]
+            if pos.status != "open":
+                return False, ""
 
-            tp    = cond["trigger_price"]
-            ctype = cond["condition_type"]
+            # 1. 停損檢查
+            if pos.is_stop_loss_hit(current_price):
+                return True, "stop_loss"
 
-            fired = False
-            if ctype == "above" and current_price >= tp:
-                fired = True
-            elif ctype == "below" and current_price <= tp:
-                fired = True
-            elif ctype == "change_up":
-                # 需有昨收價比對，此處簡化為 >= 1% 上漲
-                fired = (current_price / tp - 1) >= 0.01
-            elif ctype == "change_down":
-                fired = (current_price / tp - 1) <= -0.01
+            # 2. 移動停損回檔檢查
+            if pos.entry_mode == EntryMode.BREAKDOWN_BUY:
+                if pos.should_close_long(current_price):
+                    return True, "breakout_exit"
+            else:  # BREAKOUT_SELL
+                if pos.should_close_short(current_price):
+                    return True, "breakdown_exit"
 
-            if fired:
-                cond["active"] = False
-                cond["triggered_at"] = datetime.now().isoformat()
-                logger.info(
-                    f"條件單觸發: {cond['id']} {symbol} {current_price} "
-                    f"(條件: {ctype} {tp})"
+            return False, ""
+
+    # ══════════════════════════════════════════════════════════════
+    # 平倉執行 — close_position()
+    # ══════════════════════════════════════════════════════════════
+
+    def close_position(
+        self, symbol: str, reason: str = "manual"
+    ) -> Dict[str, Any]:
+        """
+        平倉執行
+
+        Args:
+            symbol: 商品代碼
+            reason: 平倉原因（"stop_loss" | "breakout_exit" | "breakdown_exit" | "manual"）
+
+        Returns:
+            dict — 平倉結果
+        """
+        with self._lock:
+            if symbol not in self._positions:
+                return {"success": False, "message": f"找不到 {symbol} 持倉"}
+
+            pos = self._positions[symbol]
+            if pos.status == "closed":
+                return {"success": False, "message": f"{symbol} 已平倉"}
+
+        # 決定平倉方向（與進場反向）
+        if pos.entry_mode == EntryMode.BREAKDOWN_BUY:
+            close_bs = "sell"
+        else:
+            close_bs = "buy"
+
+        # 呼叫富邦 API 下單（市價 IOC）
+        if self._client:
+            try:
+                close_resp = self._client.place_order(
+                    stock_no=symbol,
+                    price=None,         # 市價
+                    quantity=pos.quantity,
+                    order_type="market",
+                    buy_sell=close_bs,
+                    time_in_force="ioc",
                 )
+                if not close_resp.get("success"):
+                    self._failed_orders.append({
+                        "symbol": symbol,
+                        "reason": close_resp.get("message", "未知錯誤"),
+                        "close_reason": reason,
+                        "time": datetime.now().isoformat(),
+                    })
+                    return {
+                        "success": False,
+                        "message": f"平倉下單失敗: {close_resp.get('message')}",
+                    }
+                order_no = close_resp.get("order_no")
+                logger.info(
+                    f"平倉成功: {symbol} x {pos.quantity} {close_bs} "
+                    f"(@ 市價, reason={reason}) order_no={order_no}"
+                )
+            except Exception as e:
+                logger.error(f"平倉執行例外: {e}")
+                self._failed_orders.append({
+                    "symbol": symbol,
+                    "reason": str(e),
+                    "close_reason": reason,
+                    "time": datetime.now().isoformat(),
+                })
+                return {"success": False, "message": f"平倉錯誤: {e}"}
+        else:
+            # 無 client 時做脫機模擬
+            order_no = f"mock_{symbol}_{int(time.time())}"
+            logger.info(f"[MOCK] 平倉: {symbol} x {pos.quantity} {close_bs} reason={reason}")
 
-                # 執行委託
-                try:
-                    resp = self._client.place_order(
-                        stock_no=symbol,
-                        price=cond["order_price"],
-                        quantity=cond["quantity"],
-                        buy_sell=cond["action"],
-                    )
-                    cond["order_response"] = resp
+        # 更新持倉狀態
+        return self._finalize_close(symbol, close_bs, order_no, reason)
 
-                    # 執行回呼
-                    if cond.get("callback"):
-                        cond["callback"](cond, resp)
+    def _finalize_close(
+        self, symbol: str, close_bs: str, order_no: str, reason: str
+    ) -> Dict[str, Any]:
+        """內部：標記持倉為已平倉並記錄"""
+        pos = self._positions[symbol]
+        pos.status = "closed"
+        pos.closed_at = datetime.now()
 
-                except Exception as e:
-                    logger.error(f"條件單 {cond['id']} 執行失敗: {e}")
-                    cond["error"] = str(e)
+        # 計算已實現損益（使用建倉成本）
+        realized_pnl = pos.unrealized_pnl(pos.entry_cost)
+        pos.realized_pnl = realized_pnl
 
-                triggered = cond
-                break  # 一次只觸發一筆
+        record = {
+            "symbol": symbol,
+            "entry_mode": pos.entry_mode.value,
+            "entry_price": pos.entry_price,
+            "entry_cost": pos.entry_cost,
+            "close_price": pos.highest_since_entry if pos.entry_mode == EntryMode.BREAKDOWN_BUY else pos.lowest_since_entry,
+            "quantity": pos.quantity,
+            "entry_time": pos.entry_time.isoformat(),
+            "close_time": pos.closed_at.isoformat(),
+            "realized_pnl": round(realized_pnl, 2),
+            "close_reason": reason,
+            "order_no": order_no,
+        }
+        self._closed_positions.append(record)
 
-        return triggered
+        logger.info(
+            f"平倉記錄: {symbol} {pos.entry_mode.value} "
+            f"建倉@{pos.entry_price:.2f} → 平倉@{record['close_price']:.2f} "
+            f"損益: {realized_pnl:+.2f}"
+        )
 
-    def remove_condition_order(self, cond_id: str) -> bool:
-        """移除條件單"""
-        for i, c in enumerate(self._condition_triggers):
-            if c["id"] == cond_id:
-                c["active"] = False
-                logger.info(f"條件單已移除: {cond_id}")
-                return True
-        return False
+        return {
+            "success": True,
+            "position": pos.to_dict(),
+            "realized_pnl": round(realized_pnl, 2),
+            "close_reason": reason,
+            "order_no": order_no,
+        }
 
-    def list_condition_orders(self) -> List[Dict[str, Any]]:
-        """列出所有條件單"""
-        return [dict(c) for c in self._condition_triggers]
+    def _force_close_position(self, symbol: str, reason: str) -> Dict[str, Any]:
+        """內部：強制平倉（不做 API 呼叫，用於重新進場）"""
+        pos = self._positions.get(symbol)
+        if not pos:
+            return {"success": False, "message": f"找不到 {symbol}"}
+        pos.status = "closed"
+        pos.closed_at = datetime.now()
+        return {"success": True, "message": f"強制平倉 {symbol}"}
 
     # ══════════════════════════════════════════════════════════════
-    # 定時器管理（13:20 自動平倉）
+    # 取得持倉
     # ══════════════════════════════════════════════════════════════
 
-    def start(self):
-        """啟動當日沖服務（含定時自動平倉）"""
-        if self._running:
-            logger.warning("DayTradeService 已在執行中")
-            return
+    def get_position(self, symbol: str) -> Optional[Dict[str, Any]]:
+        """取得特定 symbol 的持倉狀態"""
+        with self._lock:
+            pos = self._positions.get(symbol)
+            if not pos:
+                return None
+            result = pos.to_dict()
+            # 加入目前即時未實現損益（需外部餵入 current_price）
+            return result
 
-        self._running = True
-        self._timer_thread = threading.Thread(target=self._timer_loop, daemon=True)
-        self._timer_thread.start()
-        logger.info("DayTradeService 已啟動")
+    def get_all_positions(self) -> List[Dict[str, Any]]:
+        """取得所有持倉"""
+        with self._lock:
+            return [p.to_dict() for p in self._positions.values() if p.status == "open"]
 
-    def stop(self):
-        """停止當日沖服務"""
-        self._running = False
-        if self._timer_thread:
-            self._timer_thread.join(timeout=5)
-        logger.info("DayTradeService 已停止")
+    def get_closed_positions(self) -> List[Dict[str, Any]]:
+        """取得已平倉記錄（回測用）"""
+        with self._lock:
+            return list(self._closed_positions)
 
-    def _timer_loop(self):
-        """定時檢查執行緒"""
-        while self._running:
-            now = datetime.now()
-            current_t = now.time()
+    # ══════════════════════════════════════════════════════════════
+    # 批量平倉（13:20 觸發，或用戶主動呼叫）
+    # ══════════════════════════════════════════════════════════════
 
-            # 檢查是否在交易時段
-            if TW_SE_OPEN <= current_t <= TW_SE_CLOSE:
-                # 比較時間（忽略日期，只比時分秒）
-                sq_time = self._auto_square_time
-                if (
-                    current_t.hour   == sq_time.hour and
-                    current_t.minute == sq_time.minute and
-                    current_t.second <  5
-                ):
-                    logger.info("觸發自動平倉時間點，執行平倉...")
-                    try:
-                        self.auto_squaring_check()
-                    except Exception as e:
-                        logger.error(f"自動平倉執行失敗: {e}")
+    def auto_close_all(self, reason: str = "manual") -> Dict[str, Any]:
+        """
+        平掉所有未平倉持倉（用於手動觸發或 13:20 收盤前）
 
-            # 每 60 秒檢查一次
-            time.sleep(60)
+        Args:
+            reason: 平倉原因標記
+
+        Returns:
+            dict — 統計結果（成功/失敗筆數）
+        """
+        with self._lock:
+            open_symbols = [
+                sym for sym, p in self._positions.items()
+                if p.status == "open"
+            ]
+
+        if not open_symbols:
+            return {
+                "success": True,
+                "summary": "無未平倉持倉",
+                "closed": 0,
+                "failed": 0,
+            }
+
+        results = {"closed": 0, "failed": 0, "details": []}
+        for symbol in open_symbols:
+            resp = self.close_position(symbol, reason=reason)
+            if resp.get("success"):
+                results["closed"] += 1
+            else:
+                results["failed"] += 1
+            results["details"].append({"symbol": symbol, **resp})
+
+        results["summary"] = (
+            f"自動平倉完成：{results['closed']} 檔成功，{results['failed']} 檔失敗"
+        )
+        logger.info(results["summary"])
+        return results
+
+    # ══════════════════════════════════════════════════════════════
+    # 損益計算
+    # ══════════════════════════════════════════════════════════════
+
+    def calculate_pnl(self, current_prices: Dict[str, float]) -> Dict[str, Any]:
+        """
+        計算所有持倉的未實現 + 已實現損益
+
+        Args:
+            current_prices: dict — key: symbol, value: current_price
+
+        Returns:
+            dict — 損益報告
+        """
+        with self._lock:
+            realized = sum(p.realized_pnl for p in self._positions.values())
+            unrealized = sum(
+                p.unrealized_pnl(current_prices.get(p.symbol, p.entry_cost))
+                for p in self._positions.values()
+                if p.status == "open"
+            )
+            total = realized + unrealized
+
+            positions_detail = []
+            for p in self._positions.values():
+                cp = current_prices.get(p.symbol, p.entry_cost)
+                d = p.to_dict()
+                d["current_price"] = cp
+                d["current_unrealized_pnl"] = round(p.unrealized_pnl(cp), 2)
+                positions_detail.append(d)
+
+            return {
+                "realized_pnl": round(realized, 2),
+                "unrealized_pnl": round(unrealized, 2),
+                "total_pnl": round(total, 2),
+                "open_positions": len([p for p in self._positions.values() if p.status == "open"]),
+                "closed_positions": len([p for p in self._positions.values() if p.status == "closed"]),
+                "positions": positions_detail,
+                "calculated_at": datetime.now().isoformat(),
+            }
+
+    # ══════════════════════════════════════════════════════════════
+    # 失敗訂單查詢
+    # ══════════════════════════════════════════════════════════════
+
+    def get_failed_orders(self) -> List[Dict[str, Any]]:
+        """回傳平倉失敗的記錄"""
+        with self._lock:
+            return list(self._failed_orders)
+
+    # ══════════════════════════════════════════════════════════════
+    # 除錯用
+    # ══════════════════════════════════════════════════════════════
+
+    def __repr__(self) -> str:
+        with self._lock:
+            open_pos = [p for p in self._positions.values() if p.status == "open"]
+            return f"DayTradeService(持倉: {len(open_pos)} 檔)"
