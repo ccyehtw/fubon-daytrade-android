@@ -151,7 +151,7 @@ class SchedulerService:
         try:
             if self._condition_engine is not None:
                 # 預掃：評估所有 active 條件單（用昨日收盤價初步評估）
-                self._condition_engine.evaluate_all()
+                self._condition_engine.evaluate_all_conditions(quote_or_data={})
                 logger.info("[Scheduler] 盤前條件單預掃完成")
             else:
                 logger.warning("[Scheduler] ConditionEngine 未注入，跳過")

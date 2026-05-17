@@ -53,7 +53,13 @@ object FubonApiClient {
             .addInterceptor(AuthInterceptor())
             .addInterceptor(ErrorHandlingInterceptor())
             .addInterceptor(HttpLoggingInterceptor().apply {
-                level = HttpLoggingInterceptor.Level.BODY
+                // 生產環境使用 NONE，正式環境除錯時才改為 BODY/BASIC
+                // 避免 Authorization header 被輸出到日誌
+                level = if (BuildConfig.DEBUG) {
+                    HttpLoggingInterceptor.Level.BODY
+                } else {
+                    HttpLoggingInterceptor.Level.NONE
+                }
             })
             .build()
     }

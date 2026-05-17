@@ -68,7 +68,7 @@ class DayTradeService:
                 if not sym:
                     continue
                 bs  = o.get("buy_sell", "").lower()
-                qty = o.get("after_qty", 0)
+                qty = o.get("quantity", 0)  # 使用成交數量，而非 after_qty（剩餘未成交）
 
                 if sym not in self._positions:
                     self._positions[sym] = {
@@ -167,24 +167,22 @@ class DayTradeService:
 
             # 決定平倉方向：淨部位 > 0 → 賣出平倉；< 0 → 買入平倉
             if net_qty > 0:
-                # 今日買超，需賣出
-                close_price = pos.get("sell_avg", 0) or pos.get("buy_avg", 0)
+                # 今日買超，需賣出 — 使用市價單平倉（非平均成本）
                 close_resp = self._client.place_order(
                     stock_no=symbol,
-                    price=close_price,
+                    price=None,         # 市價
                     quantity=net_qty,
-                    order_type="limit",
+                    order_type="market",
                     buy_sell="sell",
                 )
             else:
-                # 今日賣超，需買回
+                # 今日賣超，需買回 — 使用市價單平倉
                 net_qty = abs(net_qty)
-                close_price = pos.get("buy_avg", 0) or pos.get("sell_avg", 0)
                 close_resp = self._client.place_order(
                     stock_no=symbol,
-                    price=close_price,
+                    price=None,         # 市價
                     quantity=net_qty,
-                    order_type="limit",
+                    order_type="market",
                     buy_sell="buy",
                 )
 

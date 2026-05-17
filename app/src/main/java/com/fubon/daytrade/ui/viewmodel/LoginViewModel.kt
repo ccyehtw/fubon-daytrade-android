@@ -19,6 +19,7 @@ data class LoginUiState(
     val certPath: Uri? = null,
     val certFileName: String? = null,
     val isLoading: Boolean = false,
+    val isLoginSuccess: Boolean = false,  // 登入成功事件
     val errorMessage: String? = null,
     val personalIdError: String? = null,
     val apiKeyError: String? = null
@@ -79,7 +80,7 @@ class LoginViewModel @Inject constructor(
 
                 result.fold(
                     onSuccess = { accounts ->
-                        _uiState.update { it.copy(isLoading = false) }
+                        _uiState.update { it.copy(isLoading = false, isLoginSuccess = true) }
                         // Store accounts in repository for later use
                         repository.saveAccounts(accounts)
                     },
