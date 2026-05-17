@@ -23,15 +23,32 @@ except ImportError:
 
 # 全域 SDK 實例（由 service.py 注入）
 _sdk: Optional[FubonSDK] = None
+# 登入時快取的期貨帳戶（用於期貨帳務查詢）
+_futopt_account = None
 
 # SQLite 資料庫路徑（條件單持久化）
 DB_PATH = os.path.join(os.path.dirname(__file__), "condition_orders.db")
 
 
-def init_sdk(sdk_instance):
-    """注入 SDK 實例"""
-    global _sdk
+def init_sdk(sdk_instance, accounts: List[Any] = None):
+    """注入 SDK 實例 + 緩存期貨帳戶
+
+    Args:
+        sdk_instance: FubonSDK 實例（已登入）
+        accounts: 登入後取得的帳戶列表（login_result.data），若為 None 則嘗試從 sdk 本身讀取
+    """
+    global _sdk, _futopt_account
     _sdk = sdk_instance
+
+    # 優先使用傳入的 accounts，否則嘗試從 sdk 本身讀取
+    account_list = accounts if accounts is not None else getattr(sdk_instance, 'login_data', None)
+    if account_list:
+        for acc in account_list:
+            if getattr(acc, 'account_type', '') == 'futopt':
+                _futopt_account = acc
+                logger.info(f"Cached futopt account: {getattr(acc, 'account', 'N/A')} branch: {getattr(acc, 'branch_no', 'N/A')}")
+                break
+
     _init_db()
 
 
@@ -271,29 +288,46 @@ def _mock_cancel(order_id: str) -> Dict[str, Any]:
 
 def get_futures_positions() -> Dict[str, Any]:
     """
-    取得期貨持倉
+    取得期貨/期權持倉（使用 futopt_accounting.query_hybrid_position）
 
     Returns:
-        dict — 期貨持倉列表
+        dict — 期貨持倉列表（包含 entry_mode, direction, realized_pnl 等欄位）
     """
     if not _sdk:
-        return _mock_futures_positions()
+        return {"success": False, "message": "SDK not initialized"}
 
     try:
-        # 富邦期貨持倉接口
-        resp = _sdk.futures.get_positions()
+        if _futopt_account is None:
+            return {"success": False, "message": "Not logged in"}
+
+        resp = _sdk.futopt_accounting.query_hybrid_position(_futopt_account)
         if not resp.is_success:
             return {"success": False, "message": resp.message}
 
         positions = []
         for item in resp.data:
+            bs = getattr(item, 'buy_sell', None)
+            bs_str = str(bs).split('.')[-1] if bs else 'UNKNOWN'
+            direction = bs_str.upper() if bs_str in ['BUY', 'SELL'] else ('BUY' if 'Buy' in str(bs) else 'SELL')
+
+            # 期權未平倉損益計算：opt_value - opt_long_value（以原始公平價格計算）
+            opt_value = float(getattr(item, 'opt_value', 0) or 0)
+            opt_long_value = float(getattr(item, 'opt_long_value', 0) or 0)
+            realized_pnl = opt_value - opt_long_value
+
             positions.append({
                 "symbol": getattr(item, 'symbol', ''),
-                "quantity": int(getattr(item, 'quantity', 0)),
-                "avg_price": float(getattr(item, 'avg_price', 0)),
-                "market_value": float(getattr(item, 'market_value', 0)),
-                "pnl": float(getattr(item, 'pnl', 0)),
-                "bs": getattr(item, 'bs', ''),
+                "expiry_date": getattr(item, 'expiry_date', ''),
+                "strike_price": float(getattr(item, 'strike_price', 0) or 0),
+                "call_put": str(getattr(item, 'call_put', '')).split('.')[-1] if getattr(item, 'call_put', None) else '',
+                "direction": direction,
+                "quantity": int(getattr(item, 'orig_lots', 0) or 0),
+                "avg_price": float(getattr(item, 'price', 0) or 0),
+                "market_price": float(getattr(item, 'market_price', 0) or 0),
+                "profit_or_loss": float(getattr(item, 'profit_or_loss', 0) or 0),
+                "realized_pnl": realized_pnl,
+                "entry_mode": "",  # 現有系統不主動追蹤期貨 entry_mode
+                "is_spread": getattr(item, 'is_spread', False),
             })
         return {
             "success": True,
@@ -301,11 +335,15 @@ def get_futures_positions() -> Dict[str, Any]:
         }
     except Exception as e:
         logger.error(f"get_futures_positions error: {e}")
-        return _mock_futures_positions()
+        return {"success": False, "message": str(e)}
 
 
 def _mock_futures_positions() -> Dict[str, Any]:
-    """模擬期貨持倉（開發/測試用）"""
+    """模擬期貨持倉（開發/測試用）
+
+    ⚠️ 警告：此 Mock 資料僅用於本地開發。
+    實際資料必須經由 /api/login 登入後，由 Fubon SDK 取得真實帳務。
+    """
     return {
         "success": True,
         "positions": [
@@ -315,15 +353,80 @@ def _mock_futures_positions() -> Dict[str, Any]:
                 "avg_price": 21450.0,
                 "market_value": 2145000.0,
                 "pnl": 50.0,
-                "bs": "Buy",
+                "direction": "BUY",
+                "entry_mode": "breakdown_buy",
+                "realized_pnl": 0.0,
             },
             {
                 "symbol": "MXF202506",
-                "quantity": -2,
+                "quantity": 2,
                 "avg_price": 21460.0,
                 "market_value": 4292000.0,
                 "pnl": -120.0,
-                "bs": "Sell",
+                "direction": "SELL",
+                "entry_mode": "breakout_sell",
+                "realized_pnl": 0.0,
             },
         ],
+    }
+
+
+# ══════════════════════════════════════════════════════════════
+# 取得期貨帳戶保證金
+# ══════════════════════════════════════════════════════════════
+
+def get_futures_margin(account_id: str) -> Dict[str, Any]:
+    """
+    取得期貨帳戶保證金餘額（使用 futopt_accounting.query_margin_equity）
+
+    Args:
+        account_id: 期貨帳號（例: "1247180/15901" — 不包含 "futopt/"）
+
+    Returns:
+        dict — {"success": True, "margin": float, "currency": str}
+    """
+    if not _sdk:
+        return {"success": False, "message": "SDK not initialized"}
+
+    try:
+        # 取得登入時的 futopt account
+        if _futopt_account is None:
+            return {"success": False, "message": "Not logged in"}
+
+        resp = _sdk.futopt_accounting.query_margin_equity(_futopt_account)
+        if not resp.is_success:
+            return {"success": False, "message": resp.message}
+
+        # 取今日（最新）的保證金資料
+        today_data = None
+        for item in resp.data:
+            if str(getattr(item, 'date', '')).replace('/', '-') >= '2026-05-15':
+                today_data = item
+                break
+        if not today_data:
+            today_data = resp.data[0] if resp.data else None
+
+        if not today_data:
+            return {"success": False, "message": "No margin data"}
+
+        margin = float(getattr(today_data, 'today_balance', 0) or 0)
+        currency = getattr(today_data, 'currency', 'NTD')
+        return {
+            "success": True,
+            "margin": margin,
+            "currency": currency,
+            "initial_margin": getattr(today_data, 'initial_margin', 0),
+            "maintenance_margin": getattr(today_data, 'maintenance_margin', 0),
+        }
+    except Exception as e:
+        logger.error(f"get_futures_margin error: {e}")
+        return {"success": False, "message": str(e)}
+
+
+def _mock_futures_margin() -> Dict[str, Any]:
+    """模擬期貨保證金（開發/測試用）"""
+    import random
+    return {
+        "success": True,
+        "margin": round(random.uniform(80_000, 200_000), 2),
     }

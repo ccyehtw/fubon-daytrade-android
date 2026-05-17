@@ -11,6 +11,7 @@ import com.fubon.daytrade.data.repository.StockTick
 import com.fubon.daytrade.domain.model.BuySell
 import com.fubon.daytrade.domain.model.Position
 import com.fubon.daytrade.domain.model.StockOrder
+import com.fubon.daytrade.ui.components.EntryMode
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -32,6 +33,11 @@ data class DayTradeUiState(
     val quoteSymbol: String = "",
     val currentQuote: StockTick? = null,
     val isQuoteLoading: Boolean = false,
+    
+    // Dual-mode order parameters
+    val entryMode: EntryMode = EntryMode.BREAKDOWN_BUY,
+    val trackLevels: Int = 3,
+    val stopLossPct: Float = 2.0f,
     
     // Positions
     val dayTradePositions: List<DayTradePosition> = emptyList(),
@@ -66,7 +72,8 @@ data class DayTradePosition(
     val avgPrice: Double,
     val direction: BuySell,
     val currentPrice: Double = 0.0,
-    val realizedPnL: Double = 0.0
+    val realizedPnL: Double = 0.0,
+    val entryMode: String? = null
 ) {
     val unrealizedPnL: Double
         get() = when (direction) {
@@ -113,6 +120,18 @@ class DayTradeViewModel @Inject constructor(
 
     fun updateQuoteSymbol(symbol: String) {
         _uiState.update { it.copy(quoteSymbol = symbol, errorMessage = null) }
+    }
+
+    fun setEntryMode(mode: EntryMode) {
+        _uiState.update { it.copy(entryMode = mode) }
+    }
+
+    fun setTrackLevels(level: Int) {
+        _uiState.update { it.copy(trackLevels = level.coerceIn(1, 5)) }
+    }
+
+    fun setStopLossPct(pct: Float) {
+        _uiState.update { it.copy(stopLossPct = pct.coerceIn(0.5f, 5f)) }
     }
 
     fun quoteStock(symbol: String) {
@@ -175,6 +194,88 @@ class DayTradeViewModel @Inject constructor(
         placeDayTradeOrder(symbol, price, quantity, BuySell.Sell)
     }
 
+    /**
+     * 雙模式下單工廠（DayTradeService entry）
+     * 根據 entryMode 決定買賣方向與進場策略
+     */
+    fun placeDayTradeWithEntryMode(
+        symbol: String,
+        price: Double,
+        quantity: Int,
+        entryMode: EntryMode,
+        trackLevels: Int,
+        stopLossPct: Float
+    ) {
+        val (buySell, productType) = when (entryMode) {
+            EntryMode.BREAKDOWN_BUY -> BuySell.Buy to "stock"
+            EntryMode.BREAKOUT_SELL -> BuySell.Sell to "stock"
+        }
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isOrderLoading = true, orderMessage = null, errorState = ErrorState.None) }
+
+            try {
+                val account = _uiState.value.currentAccount ?: throw Exception("請先登入")
+                val result = repository.placeDayTradeEntry(
+                    accountId = account.accountId,
+                    symbol = symbol,
+                    entryMode = entryMode.name.lowercase(),
+                    price = price,
+                    quantity = quantity,
+                    stopLossPct = stopLossPct,
+                    trackLevels = trackLevels,
+                    productType = productType,
+                    tickSize = 0.5
+                )
+
+                result.fold(
+                    onSuccess = { orderId ->
+                        _uiState.update {
+                            it.copy(
+                                isOrderLoading = false,
+                                orderMessage = "[${entryMode.label}] 訂單已送出: $orderId"
+                            )
+                        }
+                        refreshDayTradePositions()
+                    },
+                    onFailure = { error ->
+                        val errorState = when {
+                            error.message?.contains("網路連線失敗") == true -> {
+                                ErrorState.NetworkError(retry = {
+                                    placeDayTradeWithEntryMode(symbol, price, quantity, entryMode, trackLevels, stopLossPct)
+                                })
+                            }
+                            error.message?.contains("連線逾時") == true -> {
+                                ErrorState.TimeoutError(retry = {
+                                    placeDayTradeWithEntryMode(symbol, price, quantity, entryMode, trackLevels, stopLossPct)
+                                })
+                            }
+                            else -> {
+                                ErrorState.ApiError(code = null, message = error.message ?: "下單失敗", retry = {
+                                    placeDayTradeWithEntryMode(symbol, price, quantity, entryMode, trackLevels, stopLossPct)
+                                })
+                            }
+                        }
+                        _uiState.update {
+                            it.copy(
+                                isOrderLoading = false,
+                                errorMessage = error.message,
+                                errorState = errorState
+                            )
+                        }
+                    }
+                )
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        isOrderLoading = false,
+                        errorMessage = "網路錯誤: ${e.message}"
+                    )
+                }
+            }
+        }
+    }
+
     private fun placeDayTradeOrder(symbol: String, price: Double, quantity: Int, buySell: BuySell) {
         val account = _uiState.value.currentAccount
         if (account == null) {
@@ -186,14 +287,6 @@ class DayTradeViewModel @Inject constructor(
             _uiState.update { it.copy(isOrderLoading = true, orderMessage = null, errorState = ErrorState.None) }
             
             try {
-                val order = StockOrder(
-                    symbol = symbol,
-                    price = price,
-                    quantity = quantity,
-                    buySell = buySell,
-                    orderType = com.fubon.daytrade.domain.model.OrderType.DayTrade
-                )
-                
                 val result = repository.placeStockOrder(
                     accountId = account.accountId,
                     symbol = symbol,
@@ -257,7 +350,9 @@ class DayTradeViewModel @Inject constructor(
                         quantity = pos.quantity,
                         avgPrice = pos.avgPrice,
                         direction = pos.direction,
-                        currentPrice = pos.currentPrice
+                        currentPrice = pos.currentPrice,
+                        realizedPnL = pos.realizedPnL ?: 0.0,
+                        entryMode = pos.entryMode
                     )
                 }
                 _uiState.update { it.copy(dayTradePositions = dayTradePositions) }

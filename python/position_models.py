@@ -1,7 +1,7 @@
 # position_models.py — 當沖 / 期貨持倉模型
 # 定義 EntryMode（進場模式）與 Position（持倉資料結構）
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 from typing import Optional
@@ -55,19 +55,20 @@ class Position:
 
     # 數量與成本
     quantity: int                        # 持有數量（股數 or 口數）
-    entry_price: float                  # 建倉均價
-    entry_cost: float                   # 建倉成本（已含手續費/滑價）
+    entry_price: float                  # 建倉均價（原始報價）
+    # entry_cost now informational only; unrealized_pnl uses entry_price directly with fee adjustment
+    entry_cost: float = 0.0              # 建倉成本（已含建倉時手續費，僅供參考）
 
     # 時間戳
-    entry_time: datetime               # 建倉時間
+    entry_time: Optional[datetime] = None  # 建倉時間（UTC）
 
     # 移動追蹤（建倉後的價格邊界）
-    highest_since_entry: float         # 建倉後最高價（用於多單平倉）
-    lowest_since_entry: float          # 建倉後最低價（用於空單平倉）
+    highest_since_entry: float = 0.0    # 建倉後最高價（用於多單平倉）
+    lowest_since_entry: float = 0.0     # 建倉後最低價（用於空單平倉）
 
     # 停損設定（進場時鎖定，不移動）
-    stop_loss_price: float              # 停損價格（跌破此價自動平倉）
-    stop_loss_pct: float                # 停損百分比（用於記錄）
+    stop_loss_price: float = 0.0       # 停損價格（跌破此價自動平倉）
+    stop_loss_pct: float = 2.0          # 停損百分比（用於記錄）
 
     # 追蹤檔位（1~5 檔，用於計算回檔平倉觸發價）
     track_levels: int = 1              # 預設 1 檔
@@ -172,15 +173,34 @@ class Position:
 
     def unrealized_pnl(self, current_price: float) -> float:
         """
-        計算未實現損益
+        計算未實現損益（含來回手續費）
 
-        多單（breakdown_buy）：(現價 - 成本) × 數量
-        空單（breakout_sell）：(成本 - 現價) × 數量
+        多單（breakdown_buy）：
+          淨利 = (現價 × fee_divider - 建倉價) × quantity
+          其中 fee_divider 為：
+            股票：1.005（已含建倉手續費）
+            期貨：1.003（已含建倉手續費）
+
+        空單（breakout_sell）：
+          淨利 = (建倉價 × fee_multiplier - 現價) × quantity
+          其中 fee_multiplier 為：
+            股票：0.995（賣出時已扣手續費）
+            期貨：0.997（賣出時已扣手續費）
         """
         if self.entry_mode == EntryMode.BREAKDOWN_BUY:
-            return (current_price - self.entry_cost) * self.quantity
+            # 多單：建倉時付出成本（含手續費），平倉時收回
+            if self.product_type == ProductType.STOCK:
+                fee_div = 1.005
+            else:
+                fee_div = 1.003
+            return (current_price / fee_div - self.entry_price) * self.quantity
         else:
-            return (self.entry_cost - current_price) * self.quantity
+            # 空單：建倉淨值已扣手續費，價差必須大於來回成本才獲利
+            if self.product_type == ProductType.STOCK:
+                fee_mult = 0.995
+            else:
+                fee_mult = 0.997
+            return (self.entry_price * fee_mult - current_price) * self.quantity
 
     def unrealized_pnl_pct(self, current_price: float) -> float:
         """未實現損益百分比"""
@@ -213,10 +233,12 @@ class Position:
             "symbol": self.symbol,
             "product_type": self.product_type.value,
             "entry_mode": self.entry_mode.value,
+            # direction: 由 entry_mode 推斷（B-breakdown_buy=Buy, breakout_sell=Sell）
+            "direction": "BUY" if self.entry_mode == EntryMode.BREAKDOWN_BUY else "SELL",
             "quantity": self.quantity,
             "entry_price": round(self.entry_price, 2),
             "entry_cost": round(self.entry_cost, 2),
-            "entry_time": self.entry_time.isoformat(),
+            "entry_time": self.entry_time.isoformat() if self.entry_time else None,
             "highest_since_entry": round(self.highest_since_entry, 2),
             "lowest_since_entry": round(self.lowest_since_entry, 2),
             "stop_loss_price": round(self.stop_loss_price, 2),
@@ -279,21 +301,11 @@ def create_position(
     """
     now = entry_time or datetime.now()
 
-    # 計算建倉成本（含手續費攤銷）
+    # entry_cost 僅供參考（資訊欄位），不再承擔來回手續費計算職責
     if product_type == ProductType.STOCK:
-        if entry_mode == EntryMode.BREAKDOWN_BUY:
-            # 多頭：成本 = 成交價 × 1.005（含手續費）
-            entry_cost = entry_price * 1.005
-        else:
-            # 空頭：成本 = 成交價 × 0.995
-            entry_cost = entry_price * 0.995
+        entry_cost = entry_price * 1.005   # 僅供參考
     else:
-        # 期貨（每點 200 元台幣，以 1 口計算）
-        multiplier = 200
-        if entry_mode == EntryMode.BREAKDOWN_BUY:
-            entry_cost = entry_price * 1.003
-        else:
-            entry_cost = entry_price * 0.997
+        entry_cost = entry_price * 1.003   # 僅供參考
 
     # 計算停損價
     if entry_mode == EntryMode.BREAKDOWN_BUY:

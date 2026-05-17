@@ -33,7 +33,11 @@ interface FubonRepository {
         symbol: String,
         price: Double?,
         quantity: Int,
-        buySell: String
+        buySell: String,
+        // 雙模式參數（可選）
+        entryMode: String? = null,
+        stopLossPct: Double? = null,
+        trackLevels: Int? = null
     ): Result<String>
 
     /** 訂閱股票報價（透過 WebSocket 即時接收） */
@@ -48,6 +52,22 @@ interface FubonRepository {
     suspend fun getStockPositions(accountId: String): List<Position>
 
     suspend fun getFuturesPositions(accountId: String): List<Position>
+
+    /** 取得期貨帳戶保證金餘額（null = 無法取得） */
+    suspend fun getFuturesMargin(accountId: String): Double?
+
+    /** 雙模式當日沖進場（DayTradeService entry） */
+    suspend fun placeDayTradeEntry(
+        accountId: String,
+        symbol: String,
+        entryMode: String,
+        price: Double,
+        quantity: Int,
+        stopLossPct: Float,
+        trackLevels: Int,
+        productType: String,
+        tickSize: Double
+    ): Result<String>
 }
 
 /** 股票 Tick（Repository 層內部使用） */

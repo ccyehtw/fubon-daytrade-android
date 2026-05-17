@@ -136,7 +136,8 @@ class FubonRepositoryImpl @Inject constructor(
         prefs.edit().putString("accounts", json).apply()
         _accounts.value = accounts
     }
-        val json = prefs.getString("accounts", null)
+
+    override suspend fun getAccounts(): List<AccountInfo> {
         return if (json != null) {
             val type = object : TypeToken<List<AccountInfo>>() {}.type
             gson.fromJson(json, type)
@@ -213,11 +214,14 @@ class FubonRepositoryImpl @Inject constructor(
         symbol: String,
         price: Double?,
         quantity: Int,
-        buySell: String
+        buySell: String,
+        entryMode: String?,
+        stopLossPct: Double?,
+        trackLevels: Int?
     ): Result<String> = withContext(Dispatchers.IO) {
         // Wrap with retry for transient errors
         val networkResult = RetryHelper.retryTradingOperation {
-            executeFuturesOrderRequest(accountId, symbol, price, quantity, buySell)
+            executeFuturesOrderRequest(accountId, symbol, price, quantity, buySell, entryMode, stopLossPct, trackLevels)
         }
         
         when (networkResult) {
@@ -233,19 +237,28 @@ class FubonRepositoryImpl @Inject constructor(
         symbol: String,
         price: Double?,
         quantity: Int,
-        buySell: String
+        buySell: String,
+        entryMode: String?,
+        stopLossPct: Double?,
+        trackLevels: Int?
     ): NetworkResult<String> = withContext(Dispatchers.IO) {
         try {
-            val requestBody = mapOf(
+            val requestBody = mutableMapOf(
                 "account_id" to accountId,
                 "symbol" to symbol,
                 "price" to price,
                 "quantity" to quantity,
-                "buy_sell" to buySell
+                "bs" to buySell
             )
+            // 加入雙模式參數（僅當有設定時）
+            entryMode?.let { requestBody["entry_mode"] = it }
+            stopLossPct?.let { requestBody["stop_loss_pct"] = it }
+            trackLevels?.let { requestBody["track_levels"] = it }
+            // 期貨最小報價單位
+            requestBody["tick_size"] = 1.0
 
             val request = Request.Builder()
-                .url("$baseUrl/api/futures/order")
+                .url("$baseUrl/futures/order")
                 .post(gson.toJson(requestBody).toRequestBody("application/json".toMediaType()))
                 .build()
 
@@ -328,10 +341,55 @@ class FubonRepositoryImpl @Inject constructor(
             }
     }
 
-    suspend fun getStockPositions(accountId: String): List<Position> = withContext(Dispatchers.IO) {
+    override suspend fun getStockPositions(accountId: String): List<Position> = withContext(Dispatchers.IO) {
         try {
             val request = Request.Builder()
-                .url("$baseUrl/api/stock/positions?account_id=$accountId")
+                .url("$baseUrl/stock/positions")
+                .get()
+                .build()
+
+            client.newCall(request).execute().use { response ->
+                if (response.isSuccessful) {
+                    val body = response.body?.string() ?: ""
+                    val result = gson.fromJson(body, PositionsResponse::class.java)
+                    result.positions?.mapNotNull { pos ->
+                        // 過濾掉 inventory 類型（沒有 direction/entryMode）
+                        if (pos.type == "inventory") {
+                            Position(
+                                symbol = pos.symbol,
+                                quantity = pos.quantity,
+                                avgPrice = pos.avgPrice ?: 0.0,
+                                direction = com.fubon.daytrade.domain.model.BuySell.Buy,
+                                currentPrice = pos.currentPrice ?: 0.0,
+                                entryMode = "",
+                                realizedPnL = pos.realizedPnL ?: 0.0
+                            )
+                        } else {
+                            Position(
+                                symbol = pos.symbol,
+                                quantity = pos.quantity,
+                                avgPrice = pos.avgPrice ?: 0.0,
+                                direction = if (pos.direction == "BUY") com.fubon.daytrade.domain.model.BuySell.Buy
+                                           else com.fubon.daytrade.domain.model.BuySell.Sell,
+                                currentPrice = pos.currentPrice ?: 0.0,
+                                entryMode = pos.entryMode ?: "",
+                                realizedPnL = pos.realizedPnL ?: 0.0
+                            )
+                        }
+                    } ?: emptyList()
+                } else {
+                    emptyList()
+                }
+            }
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    override suspend fun getFuturesPositions(accountId: String): List<Position> = withContext(Dispatchers.IO) {
+        try {
+            val request = Request.Builder()
+                .url("$baseUrl/futures/positions")
                 .get()
                 .build()
 
@@ -343,10 +401,12 @@ class FubonRepositoryImpl @Inject constructor(
                         Position(
                             symbol = pos.symbol,
                             quantity = pos.quantity,
-                            avgPrice = pos.avgPrice,
-                            direction = if (pos.direction == "BUY") com.fubon.daytrade.domain.model.BuySell.Buy 
+                            avgPrice = pos.avgPrice ?: 0.0,
+                            direction = if (pos.direction == "BUY") com.fubon.daytrade.domain.model.BuySell.Buy
                                        else com.fubon.daytrade.domain.model.BuySell.Sell,
-                            currentPrice = pos.currentPrice
+                            currentPrice = pos.currentPrice ?: 0.0,
+                            entryMode = pos.entryMode ?: "",
+                            realizedPnL = pos.realizedPnL ?: 0.0
                         )
                     } ?: emptyList()
                 } else {
@@ -358,33 +418,70 @@ class FubonRepositoryImpl @Inject constructor(
         }
     }
 
-    suspend fun getFuturesPositions(accountId: String): List<Position> = withContext(Dispatchers.IO) {
+    override suspend fun getFuturesMargin(accountId: String): Double? = withContext(Dispatchers.IO) {
         try {
             val request = Request.Builder()
-                .url("$baseUrl/api/futures/positions?account_id=$accountId")
+                .url("$baseUrl/futures/margin")
                 .get()
                 .build()
 
             client.newCall(request).execute().use { response ->
                 if (response.isSuccessful) {
                     val body = response.body?.string() ?: ""
-                    val result = gson.fromJson(body, PositionsResponse::class.java)
-                    result.positions?.map { pos ->
-                        Position(
-                            symbol = pos.symbol,
-                            quantity = pos.quantity,
-                            avgPrice = pos.avgPrice,
-                            direction = if (pos.direction == "BUY") com.fubon.daytrade.domain.model.BuySell.Buy 
-                                       else com.fubon.daytrade.domain.model.BuySell.Sell,
-                            currentPrice = pos.currentPrice
-                        )
-                    } ?: emptyList()
+                    val result = gson.fromJson(body, MarginResponse::class.java)
+                    result.margin
                 } else {
-                    emptyList()
+                    null
                 }
             }
         } catch (e: Exception) {
-            emptyList()
+            null
+        }
+    }
+
+    override suspend fun placeDayTradeEntry(
+        accountId: String,
+        symbol: String,
+        entryMode: String,
+        price: Double,
+        quantity: Int,
+        stopLossPct: Float,
+        trackLevels: Int,
+        productType: String,
+        tickSize: Double
+    ): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val json = gson.toJson(
+                mapOf(
+                    "account_id" to accountId,
+                    "symbol" to symbol,
+                    "entry_mode" to entryMode,
+                    "price" to price,
+                    "quantity" to quantity,
+                    "stop_loss_pct" to stopLossPct,
+                    "track_levels" to trackLevels,
+                    "product_type" to productType,
+                    "tick_size" to tickSize
+                )
+            )
+
+            val request = Request.Builder()
+                .url("$baseUrl/stock/entry")
+                .post(RequestBody.create("application/json".toMediaType(), json))
+                .build()
+
+            client.newCall(request).execute().use { response ->
+                val body = response.body?.string() ?: ""
+                if (response.isSuccessful) {
+                    val result = gson.fromJson(body, Map::class.java)
+                    val orderId = (result["order_id"] as? String) ?: (result["success"].toString())
+                    Result.success(orderId)
+                } else {
+                    Result.failure(Exception("下單失敗 (${response.code}): $body"))
+                }
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
         }
     }
 }
@@ -415,7 +512,14 @@ data class PositionsResponse(
 data class PositionDto(
     val symbol: String,
     val quantity: Int,
-    val avgPrice: Double,
-    val direction: String,
-    val currentPrice: Double
+    val avgPrice: Double? = null,
+    val direction: String? = null,
+    val currentPrice: Double? = null,
+    val entryMode: String? = null,
+    val realizedPnL: Double? = null,
+    val type: String? = null  // "inventory" for real holdings, null for daytrade positions
+)
+
+data class MarginResponse(
+    val margin: Double?
 )

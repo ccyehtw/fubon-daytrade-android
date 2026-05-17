@@ -11,7 +11,7 @@ import os
 from dataclasses import dataclass, asdict
 from typing import Optional, List, Dict, Any
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -46,6 +46,7 @@ app.add_middleware(
 # Global SDK instance
 sdk: Optional[FubonSDK] = None
 accounts_cache: List[Dict[str, str]] = []
+_stock_account = None  # 證券帳戶（登入時快取）
 
 # 條件單引擎（單例）
 condition_engine = None
@@ -158,11 +159,19 @@ class StockPnlRequest(BaseModel):
 # ========== 期貨下單 Request/Response Models ==========
 
 class FuturesOrderRequest(BaseModel):
-    account: str          # 期貨帳號
-    futures_code: str     # 期貨商品代碼
-    price: Optional[float] # 委託價格（None = 市價）
-    quantity: int         # 委託口數
-    bs: str = "buy"       # "buy" | "sell"
+    # 支援 account (舊) 和 account_id (新) 兩種命名
+    account: Optional[str] = None
+    account_id: Optional[str] = None
+    futures_code: Optional[str] = None  # 舊命名（向後相容）
+    symbol: Optional[str] = None        # 新命名（通用代碼）
+    price: Optional[float] = None       # 委託價格（None = 市價）
+    quantity: int = 1
+    bs: Optional[str] = None           # 舊版期貨下單（"buy" | "sell"）
+    # 雙模式參數（可選）
+    entry_mode: Optional[str] = None   # "breakdown_buy" | "breakout_sell"
+    stop_loss_pct: Optional[float] = None
+    track_levels: Optional[int] = None
+    tick_size: Optional[float] = None   # 最小報價單位
 
 
 class FuturesConditionOrderRequest(BaseModel):
@@ -232,14 +241,14 @@ async def sdk_login(personal_id: str, api_key: str, cert_path: str, cert_passwor
             for acc in result.data:
                 acc_type = getattr(acc, 'account_type', 'unknown')
                 if acc_type == "futopt":
-                    display_name = f"期貨 {getattr(acc, 'account_id', 'N/A')}"
+                    display_name = f"期貨 {getattr(acc, 'account', 'N/A')}"
                 elif acc_type == "stock":
-                    display_name = f"證券 {getattr(acc, 'account_id', 'N/A')}"
+                    display_name = f"證券 {getattr(acc, 'account', 'N/A')}"
                 else:
-                    display_name = f"{acc_type} {getattr(acc, 'account_id', 'N/A')}"
+                    display_name = f"{acc_type} {getattr(acc, 'account', 'N/A')}"
 
                 accounts.append({
-                    "account_id": getattr(acc, 'account_id', ''),
+                    "account_id": getattr(acc, 'account', ''),
                     "account_type": acc_type,
                     "display_name": display_name
                 })
@@ -249,14 +258,23 @@ async def sdk_login(personal_id: str, api_key: str, cert_path: str, cert_passwor
         # 初始化其他模組的 SDK
         try:
             from futures_quote import init_sdk as fq_init
-            fq_init(sdk)
+            fq_init(sdk, result.data)
         except Exception as e:
             logger.warning(f"futures_quote init error: {e}")
         try:
             from futures_order import init_sdk as fo_init
-            fo_init(sdk)
+            fo_init(sdk, result.data)
         except Exception as e:
             logger.warning(f"futures_order init error: {e}")
+
+        # 快取證券帳戶（供 /stock/positions 使用）
+        global _stock_account
+        _stock_account = None
+        for acc in result.data:
+            if getattr(acc, 'account_type', '') == 'stock':
+                _stock_account = acc
+                logger.info(f"Cached stock account: {getattr(acc, 'account', 'N/A')} branch: {getattr(acc, 'branch_no', 'N/A')}")
+                break
 
         return LoginResponse(
             success=True,
@@ -375,14 +393,36 @@ async def stock_position(symbol: str):
 @app.get("/stock/positions")
 async def stock_positions():
     """
-    查詢所有未平倉持倉
+    查詢所有未平倉持倉（當日沖內部持倉 + 券商真實庫存）
 
     GET /stock/positions
     """
     try:
         svc = get_daytrade_service()
-        positions = svc.get_all_positions()
-        return {"success": True, "open_positions": positions, "count": len(positions)}
+        daytrade_positions = svc.get_all_positions()
+
+        # 尝试读取券商真实库存
+        real_inventory = []
+        if sdk and _stock_account:
+            try:
+                inv_resp = sdk.accounting.inventories(_stock_account)
+                if inv_resp.is_success and inv_resp.data:
+                    for item in inv_resp.data:
+                        stock_no = getattr(item, 'stock_no', '')
+                        qty = getattr(item, 'tradable_qty', 0)
+                        if qty > 0:
+                            real_inventory.append({
+                                "symbol": stock_no,
+                                "name": "",
+                                "quantity": qty,
+                                "type": "inventory",
+                            })
+            except Exception as e:
+                logger.warning(f"inventory query failed: {e}")
+
+        # 合併：當日沖持倉 + 券商庫存
+        positions = daytrade_positions + real_inventory
+        return {"success": True, "positions": positions, "count": len(positions)}
     except Exception as e:
         logger.error(f"/stock/positions error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -508,17 +548,42 @@ async def futures_chain(req: FuturesChainRequest):
 @app.post("/futures/order")
 async def futures_order(req: FuturesOrderRequest):
     """
-    期貨下單（市價/限價）
+    期貨下單（市價/限價 + 雙模式）
 
     POST /futures/order
     Body: {"account": "1247180/futopt/15901", "futures_code": "TXF202506",
            "price": 21500.0, "quantity": 1, "bs": "buy"}
+    Body (雙模式): {"account_id": "...", "symbol": "TXF", "entry_mode": "breakdown_buy",
+                   "quantity": 1, "stop_loss_pct": 2.0, "track_levels": 3}
     """
     try:
+        # 支援 account_id (新) 和 account (舊) 兩種命名
+        account = req.account_id or req.account or ""
+
+        # 支援 symbol (新) 和 futures_code (舊) 兩種命名
+        futures_code = req.symbol or req.futures_code or ""
+
+        # 雙模式：若指定了 entry_mode，走 DayTradeService 流程
+        if req.entry_mode:
+            svc = get_daytrade_service()
+            result = svc.entry(
+                symbol=futures_code,
+                entry_mode=req.entry_mode,
+                price=req.price or 0.0,
+                quantity=req.quantity,
+                stop_loss_pct=req.stop_loss_pct or 2.0,
+                track_levels=req.track_levels or 3,
+                product_type="futures",
+                account_id=account,
+                tick_size=req.tick_size or 1.0,  # 期貨最小報價 1 點
+            )
+            return result
+
+        # 傳統期貨下單
         from futures_order import place_futures_order
         result = place_futures_order(
-            account=req.account,
-            futures_code=req.futures_code,
+            account=account,
+            futures_code=futures_code,
             price=req.price,
             quantity=req.quantity,
             bs=req.bs
@@ -582,9 +647,49 @@ async def futures_positions():
     try:
         from futures_order import get_futures_positions
         result = get_futures_positions()
+        # 將 get_futures_positions 的 positions 陣列(map) ，
+        # 轉為與 /stock/positions 一致的格式（加入 direction / entry_mode / realized_pnl）
+        if result.get("success") and "positions" in result:
+            return {
+                "success": True,
+                "positions": [
+                    {
+                        "symbol": p.get("symbol", ""),
+                        "direction": p.get("direction", "BUY"),
+                        "quantity": p.get("quantity", 0),
+                        "avg_price": p.get("avg_price", 0.0),
+                        "entry_mode": p.get("entry_mode", ""),
+                        "realized_pnl": p.get("realized_pnl", 0.0),
+                        "current_price": p.get("current_price") or p.get("avg_price", 0.0),
+                    }
+                    for p in result["positions"]
+                ],
+                "count": len(result["positions"]),
+            }
         return result
     except Exception as e:
         logger.error(f"/futures/positions error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/futures/margin")
+async def futures_margin(account_id: str = ""):
+    """
+    取得期貨帳戶保證金餘額
+
+    GET /futures/margin  （login 後可用，account_id 參數已廢棄，改用登入後快取的期貨帳戶）
+    """
+    try:
+        from futures_order import get_futures_margin
+        # account_id 參數已廢棄（改用登入時快取的 _futopt_account）
+        result = get_futures_margin("")
+        if result.get("success"):
+            return result
+        raise HTTPException(status_code=400, detail=result.get("message", "查詢失敗"))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"/futures/margin error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

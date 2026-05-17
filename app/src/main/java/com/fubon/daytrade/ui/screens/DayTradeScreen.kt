@@ -46,6 +46,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.fubon.daytrade.domain.model.BuySell
+import com.fubon.daytrade.ui.components.EntryMode
 import com.fubon.daytrade.ui.components.OrderPanel
 import com.fubon.daytrade.ui.components.QuoteCard
 import com.fubon.daytrade.ui.theme.LimitDownBlue
@@ -125,7 +126,13 @@ fun DayTradeScreen(
                     },
                     onSell = { price, quantity ->
                         viewModel.placeDayTradeSell(uiState.quoteSymbol, price, quantity)
-                    }
+                    },
+                    entryMode = uiState.entryMode,
+                    onEntryModeChange = { viewModel.setEntryMode(it) },
+                    trackLevels = uiState.trackLevels,
+                    onTrackLevelsChange = { viewModel.setTrackLevels(it) },
+                    stopLossPct = uiState.stopLossPct,
+                    onStopLossPctChange = { viewModel.setStopLossPct(it) }
                 )
             }
         }
@@ -451,6 +458,33 @@ private fun DayTradePositionCard(position: DayTradePosition) {
                             fontWeight = FontWeight.Bold,
                             color = directionColor
                         )
+                    }
+                    // 顯示進場模式標籤（如果有）
+                    position.entryMode?.let { mode ->
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Box(
+                            modifier = Modifier
+                                .background(
+                                    when (mode) {
+                                        "breakdown_buy" -> LimitUpRed.copy(alpha = 0.08f)
+                                        "breakout_sell" -> LimitDownBlue.copy(alpha = 0.08f)
+                                        else -> MaterialTheme.colorScheme.surfaceVariant
+                                    },
+                                    RoundedCornerShape(4.dp)
+                                )
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                text = if (mode == "breakdown_buy") "追低買" else "追高賣",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Medium,
+                                color = when (mode) {
+                                    "breakdown_buy" -> LimitUpRed
+                                    "breakout_sell" -> LimitDownBlue
+                                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                                }
+                            )
+                        }
                     }
                 }
                 Text(

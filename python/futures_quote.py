@@ -20,7 +20,7 @@ except ImportError:
 _sdk: Optional[FubonSDK] = None
 
 
-def init_sdk(sdk_instance):
+def init_sdk(sdk_instance, accounts: list = None):
     """注入 SDK 實例"""
     global _sdk
     _sdk = sdk_instance

@@ -31,7 +31,9 @@ data class Position(
     val quantity: Int,
     val avgPrice: Double,
     val direction: BuySell,
-    val currentPrice: Double = 0.0
+    val currentPrice: Double = 0.0,
+    val entryMode: String? = null,    // "breakdown_buy" 或 "breakout_sell"
+    val realizedPnL: Double? = null    // 已實現損益
 ) {
     val profitLoss: Double
         get() = when (direction) {
