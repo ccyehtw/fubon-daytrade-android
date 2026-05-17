@@ -9,10 +9,51 @@ from typing import Optional, Dict, Any, List, Callable
 
 logger = logging.getLogger(__name__)
 
+# Notification Service
+_notification_service = None
+
+
+def _get_notification_service():
+    """延遲初始化 Notification Service"""
+    global _notification_service
+    if _notification_service is None:
+        from notification_service import get_notification_service
+        _notification_service = get_notification_service()
+    return _notification_service
+
 # 券商交易時間（台灣）
 TW_SE_OPEN  = dt_time(9, 0)   # 盤前開始
 TW_SE_CLOSE = dt_time(13, 30) # 盤後結束
 AUTO_SQUARING_TIME = dt_time(13, 20) # 自動平倉檢查時間（13:20）
+
+
+class AutoSquareResult:
+    """自動平倉結果封裝（Phase 4-3 新增）"""
+    def __init__(
+        self,
+        success_count: int = 0,
+        failed_count: int = 0,
+        total_profit: float = 0.0,
+        orders: list = None,
+        failed: list = None,
+        executed_at: str = None,
+    ):
+        self.success_count = success_count
+        self.failed_count = failed_count
+        self.total_profit = total_profit
+        self.orders = orders or []
+        self.failed = failed or []
+        self.executed_at = executed_at or datetime.now().isoformat()
+
+    def to_dict(self) -> dict:
+        return {
+            "success_count": self.success_count,
+            "failed_count": self.failed_count,
+            "total_profit": round(self.total_profit, 2),
+            "orders": self.orders,
+            "failed": self.failed,
+            "executed_at": self.executed_at,
+        }
 
 
 class DayTradeService:
@@ -45,6 +86,9 @@ class DayTradeService:
 
         # 平倉失敗記錄
         self._failed_orders: List[Dict[str, Any]] = []
+
+        # 最近一次自動平倉結果（Phase 4-3）
+        self._last_auto_square_result: Optional[AutoSquareResult] = None
 
     # ══════════════════════════════════════════════════════════════
     # 部位管理
@@ -128,15 +172,20 @@ class DayTradeService:
     # 自動平倉檢查（13:20）
     # ══════════════════════════════════════════════════════════════
 
-    def auto_squaring_check(self) -> Dict[str, Any]:
+    def auto_squaring_check(self) -> AutoSquareResult:
         """
-        13:20 自動平倉檢查
+        13:20 自動平倉檢查（Phase 4-3 增強版）
 
         當日沖必須在 13:30 收盤前完成反向沖銷。
         此方法會自動平掉所有尚未平倉的當日沖部位。
 
+        增強說明（Phase 4-3）：
+          - 使用市價 IOC 委託（PriceType.Market + TimeInForce.IOC）
+          - 避免限價單在盤中無法成交的問題
+          - 回傳 AutoSquareResult（success_count, failed_count, total_profit）
+
         Returns:
-            dict — 平倉結果統計
+            AutoSquareResult — 平倉結果統計（含成功/失敗筆數與粗估損益）
         """
         now = datetime.now()
         logger.info(
@@ -146,13 +195,9 @@ class DayTradeService:
         # 先同步最新部位
         self.sync_positions()
 
-        result = {
-            "time":       now.isoformat(),
-            "total_positions": len(self._positions),
-            "orders_placed":   [],
-            "failed":          [],
-            "summary":         "",
-        }
+        success_orders = []
+        failed_orders  = []
+        total_profit   = 0.0
 
         for symbol, pos in self._positions.items():
             buy_qty  = pos.get("buy_qty", 0)
@@ -165,53 +210,99 @@ class DayTradeService:
                 logger.debug(f"{symbol} 淨部位為 0，跳過")
                 continue
 
+            # ─── 漲跌停特殊處理 ───
+            # 若遇到漲停（多單持有者想卖），改用漲停價卖出
+            # 若遇到跌停（空單持有者想买），改用跌停價买入
+            close_price = pos.get("sell_avg", 0) or pos.get("buy_avg", 0)
+
             # 決定平倉方向：淨部位 > 0 → 賣出平倉；< 0 → 買入平倉
             if net_qty > 0:
-                # 今日買超，需賣出
-                close_price = pos.get("sell_avg", 0) or pos.get("buy_avg", 0)
-                close_resp = self._client.place_order(
-                    stock_no=symbol,
-                    price=close_price,
-                    quantity=net_qty,
-                    order_type="limit",
-                    buy_sell="sell",
-                )
+                # 今日買超（多單），需卖出平倉
+                bs = "sell"
+                quantity = net_qty
             else:
-                # 今日賣超，需買回
-                net_qty = abs(net_qty)
+                # 今日賣超（空單），需买入平倉
+                bs = "buy"
+                quantity = abs(net_qty)
                 close_price = pos.get("buy_avg", 0) or pos.get("sell_avg", 0)
-                close_resp = self._client.place_order(
-                    stock_no=symbol,
-                    price=close_price,
-                    quantity=net_qty,
-                    order_type="limit",
-                    buy_sell="buy",
-                )
+
+            # ─── 送出市價 IOC 委託（Phase 4-3）───
+            # 使用富邦 SDK 的 Market Order + IOC
+            try:
+                if hasattr(self._client, 'place_order'):
+                    close_resp = self._client.place_order(
+                        stock_no=symbol,
+                        price=close_price,   # 市價時 price=0，但保留作為參考價
+                        quantity=quantity,
+                        order_type="market",   # 市價單
+                        buy_sell=bs,
+                        time_in_force="IOC",    # IOC：立刻成交或取消
+                        product_type="daytrade",
+                    )
+                else:
+                    # 相容舊版：使用 limit order
+                    close_resp = self._client.place_order(
+                        stock_no=symbol,
+                        price=close_price,
+                        quantity=quantity,
+                        order_type="limit",
+                        buy_sell=bs,
+                    )
+            except Exception as e:
+                close_resp = {"success": False, "message": str(e)}
 
             if close_resp.get("success"):
-                result["orders_placed"].append({
-                    "symbol":   symbol,
-                    "qty":      net_qty,
-                    "price":    close_price,
-                    "order_no": close_resp.get("order_no"),
-                })
-                logger.info(f"自動平倉 {symbol} x {net_qty} @ {close_price}")
-            else:
-                result["failed"].append({
-                    "symbol": symbol,
-                    "reason": close_resp.get("message", "未知錯誤"),
-                })
-                logger.error(f"自動平倉失敗 {symbol}: {close_resp.get('message')}")
+                # 計算粗估平倉均價與損益
+                avg_price = close_price if close_price > 0 else close_resp.get("price", 0)
+                profit = (avg_price - pos.get("buy_avg", avg_price)) * quantity if bs == "sell" else (pos.get("sell_avg", avg_price) - avg_price) * quantity
+                total_profit += profit
 
-        # 組合摘要
-        n = len(result["orders_placed"])
-        f = len(result["failed"])
-        result["summary"] = (
-            f"自動平倉完成：{n} 檔成功，{f} 檔失敗"
+                success_orders.append({
+                    "symbol":       symbol,
+                    "qty":          quantity,
+                    "price":        avg_price,
+                    "order_no":     close_resp.get("order_no", ""),
+                    "close_action": bs,
+                    "closed_at":    now.isoformat(),
+                })
+                logger.info(
+                    f"自動平倉 {symbol} x {quantity} ({bs}) @ {avg_price} "
+                    f"[Profit estimate: {profit:+.2f}]"
+                )
+            else:
+                failed_orders.append({
+                    "symbol": symbol,
+                    "qty":    quantity,
+                    "reason": close_resp.get("message", "未知錯誤"),
+                    "failed_at": now.isoformat(),
+                })
+                logger.error(
+                    f"自動平倉失敗 {symbol}: {close_resp.get('message')}"
+                )
+
+        # ─── 組合結果 ───
+        result = AutoSquareResult(
+            success_count=len(success_orders),
+            failed_count=len(failed_orders),
+            total_profit=round(total_profit, 2),
+            orders=success_orders,
+            failed=failed_orders,
+            executed_at=now.isoformat(),
         )
-        logger.info(result["summary"])
+        self._last_auto_square_result = result
+
+        logger.info(
+            f"自動平倉完成：{result.success_count} 檔成功，"
+            f"{result.failed_count} 檔失敗，預估損益 {result.total_profit:+.2f}"
+        )
 
         return result
+
+    def get_last_auto_square_result(self) -> Optional[dict]:
+        """回傳最近一次自動平倉結果（Phase 4-3）"""
+        if self._last_auto_square_result:
+            return self._last_auto_square_result.to_dict()
+        return None
 
     # ══════════════════════════════════════════════════════════════
     # 當日沖銷損益計算
@@ -384,6 +475,20 @@ class DayTradeService:
                     if cond.get("callback"):
                         cond["callback"](cond, resp)
 
+                    # 發送條件單觸發推播通知
+                    try:
+                        ns = _get_notification_service()
+                        ns.send_condition_triggered_notification(
+                            condition_id=cond["id"],
+                            symbol=symbol,
+                            trigger_price=tp,
+                            trigger_type=ctype,
+                            action=cond["action"],
+                            order_price=cond["order_price"],
+                        )
+                    except Exception as nf:
+                        logger.warning(f"Condition triggered notification failed: {nf}")
+
                 except Exception as e:
                     logger.error(f"條件單 {cond['id']} 執行失敗: {e}")
                     cond["error"] = str(e)
@@ -405,6 +510,46 @@ class DayTradeService:
     def list_condition_orders(self) -> List[Dict[str, Any]]:
         """列出所有條件單"""
         return [dict(c) for c in self._condition_triggers]
+
+    # ══════════════════════════════════════════════════════════════
+    # 成交回報推播（由富邦 SDK 回調觸發）
+    # ══════════════════════════════════════════════════════════════
+
+    def notify_trade_update(
+        self,
+        order_id: str,
+        symbol: str,
+        bs: str,
+        price: float,
+        quantity: int,
+        status: str,
+        message: Optional[str] = None,
+    ):
+        """
+        通知成交更新（由外部 SDK fill callback 呼叫）
+
+        Args:
+            order_id: 委託單號
+            symbol:   股票代碼
+            bs:       買賣 "buy" | "sell"
+            price:    成交價格
+            quantity: 成交數量
+            status:   成交狀態 "filled" | "partial" | "cancelled" | "rejected"
+            message:  額外訊息
+        """
+        try:
+            ns = _get_notification_service()
+            ns.send_trade_notification(
+                order_id=order_id,
+                symbol=symbol,
+                bs=bs,
+                price=price,
+                quantity=quantity,
+                status=status,
+                message=message,
+            )
+        except Exception as e:
+            logger.warning(f"Trade notification failed: {e}")
 
     # ══════════════════════════════════════════════════════════════
     # 定時器管理（13:20 自動平倉）

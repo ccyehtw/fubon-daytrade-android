@@ -11,9 +11,11 @@ import os
 from dataclasses import dataclass, asdict
 from typing import Optional, List, Dict, Any
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+import asyncio
+import json
 
 # 富邦 SDK
 try:
@@ -46,6 +48,9 @@ accounts_cache: List[Dict[str, str]] = []
 # 條件單引擎（單例）
 condition_engine = None
 
+# WebSocket Connection Manager（單例）
+ws_manager = None
+
 
 def get_condition_engine():
     """延遲初始化條件單引擎"""
@@ -55,6 +60,15 @@ def get_condition_engine():
         condition_engine = ConditionEngine()
         condition_engine.load_from_db()
     return condition_engine
+
+
+def get_ws_manager():
+    """延遲初始化 WebSocket Manager"""
+    global ws_manager
+    if ws_manager is None:
+        from websocket_manager import ConnectionManager
+        ws_manager = ConnectionManager()
+    return ws_manager
 
 
 # ========== Data Models ==========
@@ -495,6 +509,175 @@ async def condition_evaluate(req: ConditionEvaluateRequest):
     except Exception as e:
         logger.error(f"/condition/evaluate error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ══════════════════════════════════════════════════════════════
+# WebSocket 即時推送端點
+# ══════════════════════════════════════════════════════════════
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    """
+    WebSocket 端點 — 接收 Android App 連線
+
+    Android App 可透過此端訂閱即時事件：
+    - order_update: 成交通知
+    - condition_triggered: 條件單觸發
+    - auto_square: 自動平倉
+    - quote_alert: 報價警報
+
+    客戶端範例（JavaScript）：
+        const ws = new WebSocket("ws://host:port/ws");
+        ws.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            console.log(data.event, data.data);
+        };
+    """
+    manager = get_ws_manager()
+    client_id = await manager.connect(websocket)
+
+    try:
+        while True:
+            # 接收客戶端訊息（ping/pong 或訂閱控制）
+            data = await websocket.receive_text()
+            try:
+                msg = json.loads(data)
+                event = msg.get("event", "")
+
+                if event == "ping":
+                    await websocket.send_json({
+                        "event": "pong",
+                        "timestamp": datetime.now().isoformat(),
+                    })
+                elif event == "subscribe":
+                    # 客戶端訂閱特定事件（目前廣播已包含所有事件，此處預留）
+                    await websocket.send_json({
+                        "event": "subscribed",
+                        "topics": msg.get("topics", []),
+                    })
+                else:
+                    # 回覆收到了
+                    await websocket.send_json({
+                        "event": "ack",
+                        "original_event": event,
+                    })
+            except json.JSONDecodeError:
+                # 非 JSON 訊息，當作 ping 處理
+                if data == "ping":
+                    await websocket.send_json({"event": "pong"})
+    except WebSocketDisconnect:
+        await manager.disconnect(client_id)
+    except Exception as e:
+        logger.error(f"WebSocket error for {client_id}: {e}")
+        await manager.disconnect(client_id)
+
+
+# ══════════════════════════════════════════════════════════════
+# Notification 端點
+# ══════════════════════════════════════════════════════════════
+
+class TokenRegisterRequest(BaseModel):
+    client_id: str
+    platform: str  # "firebase" | "line" | "telegram"
+    token: str
+    metadata: Optional[Dict[str, Any]] = None
+
+
+class ManualNotificationRequest(BaseModel):
+    title: str
+    body: str
+    event_type: str = "manual"
+    data: Optional[Dict[str, Any]] = None
+
+
+@app.post("/notification/register")
+async def register_notification_token(req: TokenRegisterRequest):
+    """
+    註冊 client push token（for Firebase/LINE/Telegram）
+
+    POST /notification/register
+    Body: {"client_id": "user123", "platform": "firebase", "token": "..."}
+    """
+    try:
+        from notification_service import get_notification_service
+        ns = get_notification_service()
+
+        success = ns.register_client_token(
+            client_id=req.client_id,
+            platform=req.platform,
+            token=req.token,
+            metadata=req.metadata,
+        )
+
+        # 注入 ws_manager
+        ns.set_websocket_manager(get_ws_manager())
+
+        return {
+            "success": success,
+            "message": f"Token registered for {req.client_id} ({req.platform})",
+        }
+    except Exception as e:
+        logger.error(f"/notification/register error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/notification/send")
+async def send_notification(req: ManualNotificationRequest):
+    """
+    手動發送通知（管理後台）
+
+    POST /notification/send
+    Body: {"title": "Test", "body": "Hello", "event_type": "manual"}
+    """
+    try:
+        from notification_service import get_notification_service
+        ns = get_notification_service()
+        ns.set_websocket_manager(get_ws_manager())
+
+        success = ns.send_custom_notification(
+            title=req.title,
+            body=req.body,
+            event_type=req.event_type,
+            data=req.data,
+        )
+
+        return {
+            "success": success,
+            "message": f"Notification sent: {req.title}",
+        }
+    except Exception as e:
+        logger.error(f"/notification/send error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/notification/clients")
+async def get_notification_clients():
+    """
+    取得已連線的 WebSocket clients 概覽
+    """
+    manager = get_ws_manager()
+    return manager.get_clients_summary()
+
+
+# ══════════════════════════════════════════════════════════════
+# 健康檢查增強
+# ══════════════════════════════════════════════════════════════
+
+@app.get("/health")
+async def health_check():
+    """
+    健康檢查端點
+
+    GET /health
+    Returns: {"status": "healthy", "sdk_ready": bool, "ws_clients": int}
+    """
+    manager = get_ws_manager()
+    return {
+        "status": "healthy",
+        "sdk_ready": sdk is not None,
+        "ws_clients": manager.get_connection_count(),
+        "version": "1.2.0",
+    }
 
 
 # ========== Main ==========
