@@ -22,7 +22,10 @@ import androidx.navigation.compose.rememberNavController
 import com.fubon.daytrade.ui.screens.DayTradeScreen
 import com.fubon.daytrade.ui.screens.FuturesScreen
 import com.fubon.daytrade.ui.screens.LoginScreen
+import com.fubon.daytrade.ui.screens.QuoteScreen
 import com.fubon.daytrade.ui.screens.SettingsScreen
+import com.fubon.daytrade.ui.viewmodel.DayTradeViewModel
+import androidx.hilt.navigation.compose.hiltViewModel
 
 data class BottomNavItem(
     val route: String,
@@ -65,6 +68,8 @@ fun MainScreen(
     onLogout: () -> Unit
 ) {
     val navController = rememberNavController()
+    val dayTradeViewModel: DayTradeViewModel = hiltViewModel()
+
     val items = listOf(
         BottomNavItem(Screen.DayTrade.route, "當沖", { Icon(Icons.Default.Home, contentDescription = "當沖") }),
         BottomNavItem(Screen.Futures.route, "期貨", { Icon(Icons.Default.Home, contentDescription = "期貨") }),
@@ -102,7 +107,18 @@ fun MainScreen(
             modifier = Modifier.padding(innerPadding)
         ) {
             composable(Screen.DayTrade.route) {
-                DayTradeScreen()
+                DayTradeScreen(
+                    viewModel = dayTradeViewModel,
+                    onNavigateToQuote = {
+                        navController.navigate(Screen.Quote.route)
+                    }
+                )
+            }
+            composable(Screen.Quote.route) {
+                QuoteScreen(
+                    viewModel = dayTradeViewModel,
+                    onNavigateBack = { navController.popBackStack() }
+                )
             }
             composable(Screen.Futures.route) {
                 FuturesScreen()
