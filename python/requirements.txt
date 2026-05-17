@@ -1,0 +1,17 @@
+# 富邦新一代 API Python SDK
+# 安裝: pip install fubon_neo 或指定本地 whl
+# 參考: https://www.fbs.com.tw/TradeAPI/docs/welcome/
+fubon_neo>=2.0.0
+
+# 選用：pandas（資料分析）
+pandas>=1.5.0
+
+# 選用：requests（HTTP 備援）
+requests>=2.28.0
+
+# 選用：schedule（定時任務）
+schedule>=1.2.0
+
+# 開發用
+pytest>=7.0.0
+pytest-asyncio>=0.21.0
