@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.fubon.daytrade.data.model.AccountInfo
 import com.fubon.daytrade.data.network.NetworkResult
+import com.fubon.daytrade.data.network.WebSocketClient
 import com.fubon.daytrade.data.repository.FubonRepository
 import com.fubon.daytrade.data.repository.RetryHelper
 import com.fubon.daytrade.data.repository.StockTick
@@ -122,22 +123,45 @@ class DayTradeViewModel @Inject constructor(
 
         viewModelScope.launch {
             _uiState.update { it.copy(isQuoteLoading = true, errorMessage = null) }
-            
+
             try {
-                repository.subscribeStockPrice(symbol).collect { tick ->
-                    _uiState.update { 
-                        it.copy(
-                            currentQuote = tick,
-                            isQuoteLoading = false
-                        ) 
+                // 透過 WebSocket 取得即時報價
+                val wsClient = repository.getWebSocketClient()
+                if (!wsClient.connected) {
+                    wsClient.connect()
+                }
+                wsClient.subscribe(listOf(symbol))
+
+                // 觀察股票報價 Flow（當 symbol 的報價更新時自動通知 UI）
+                wsClient.stockQuotesFlow.collect { tickMap ->
+                    val tick = tickMap[symbol.uppercase()]
+                    if (tick != null) {
+                        _uiState.update {
+                            it.copy(
+                                currentQuote = StockTick(
+                                    symbol = tick.symbol,
+                                    price = tick.last_price,
+                                    change = tick.change,
+                                    changePercent = tick.change_percent,
+                                    volume = tick.volume,
+                                    bid = tick.bid_price,
+                                    ask = tick.ask_price,
+                                    tickSize = 0.5,
+                                    limitUpPrice = tick.limit_up_price,
+                                    limitDownPrice = tick.limit_down_price,
+                                    timestamp = System.currentTimeMillis()
+                                ),
+                                isQuoteLoading = false
+                            )
+                        }
                     }
                 }
             } catch (e: Exception) {
-                _uiState.update { 
+                _uiState.update {
                     it.copy(
                         isQuoteLoading = false,
                         errorMessage = "查詢報價失敗: ${e.message}"
-                    ) 
+                    )
                 }
             }
         }

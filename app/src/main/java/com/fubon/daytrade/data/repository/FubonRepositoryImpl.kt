@@ -5,6 +5,7 @@ import android.content.SharedPreferences
 import androidx.datastore.preferences.preferencesDataStore
 import com.fubon.daytrade.data.model.AccountInfo
 import com.fubon.daytrade.data.network.NetworkResult
+import com.fubon.daytrade.data.network.WebSocketClient
 import com.fubon.daytrade.domain.model.FuturesOrder
 import com.fubon.daytrade.domain.model.Position
 import com.fubon.daytrade.domain.model.StockOrder
@@ -16,6 +17,8 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -44,6 +47,11 @@ class FubonRepositoryImpl @Inject constructor(
 
     private val prefs: SharedPreferences by lazy {
         context.getSharedPreferences("fubon_daytrade", Context.MODE_PRIVATE)
+    }
+
+    /** WebSocket 客戶端（單例，全域共享） */
+    val wsClient: WebSocketClient by lazy {
+        WebSocketClient(baseUrl.replace("http://", "ws://").replace("https://", "wss://") + "/ws")
     }
 
     private val _accounts = MutableStateFlow<List<AccountInfo>>(emptyList())
@@ -121,13 +129,13 @@ class FubonRepositoryImpl @Inject constructor(
         }
     }
 
+    override fun getWebSocketClient(): WebSocketClient = wsClient
+
     override suspend fun saveAccounts(accounts: List<AccountInfo>) {
         val json = gson.toJson(accounts)
         prefs.edit().putString("accounts", json).apply()
         _accounts.value = accounts
     }
-
-    override suspend fun getAccounts(): List<AccountInfo> {
         val json = prefs.getString("accounts", null)
         return if (json != null) {
             val type = object : TypeToken<List<AccountInfo>>() {}.type
@@ -262,73 +270,62 @@ class FubonRepositoryImpl @Inject constructor(
         }
     }
 
-    override suspend fun subscribeStockPrice(symbol: String): Flow<StockTick> {
-        val flow = MutableStateFlow<StockTick?>(null)
-        
-        // ⚠️ MOCK DATA — 此處為模擬報價，生產環境應替換為真實 WebSocket/Polling
-        // 標記 isMock = true 區分模擬與真實資料，避免混淆
-        val isMockData = true
-        
-        val basePrice = when (symbol) {
-            "2330" -> 1080.0
-            "2317" -> 158.0
-            "2454" -> 2280.0
-            else -> 100.0 + (Math.random() * 50)
+    // ══════════════════════════════════════════════════════════════
+    // WebSocket 即時報價（取代 Mock）
+    // ══════════════════════════════════════════════════════════════
+
+    override fun subscribeStockPrice(symbol: String): Flow<StockTick> {
+        // 確保 WebSocket 已連線並訂閱
+        if (!wsClient.connected) {
+            wsClient.connect()
         }
-        
-        val change = (Math.random() - 0.5) * 10
-        val changePercent = (change / basePrice) * 100
-        
-        val tick = StockTick(
-            symbol = symbol,
-            price = basePrice + change,
-            change = change,
-            changePercent = changePercent,
-            volume = (Math.random() * 1000000).toLong(),
-            bid = basePrice + change - 0.5,
-            ask = basePrice + change + 0.5,
-            tickSize = 0.5,
-            limitUpPrice = basePrice * 1.1,
-            limitDownPrice = basePrice * 0.9,
-            timestamp = System.currentTimeMillis()
-        )
-        
-        flow.value = tick
-        
-        return flow as Flow<StockTick>
+        wsClient.subscribe(listOf(symbol))
+
+        // 將 wsClient 的股票報價 Flow 轉換為 StockTick Flow
+        return wsClient.stockQuotesFlow
+            .map { tickMap -> tickMap[symbol.uppercase()] }
+            .filterNotNull()
+            .map { wsTick ->
+                StockTick(
+                    symbol = wsTick.symbol,
+                    price = wsTick.last_price,
+                    change = wsTick.change,
+                    changePercent = wsTick.change_percent,
+                    volume = wsTick.volume,
+                    bid = wsTick.bid_price,
+                    ask = wsTick.ask_price,
+                    tickSize = 0.5,   // 股票預設
+                    limitUpPrice = wsTick.limit_up_price,
+                    limitDownPrice = wsTick.limit_down_price,
+                    timestamp = System.currentTimeMillis()
+                )
+            }
     }
 
-    override suspend fun subscribeFuturesPrice(symbol: String): Flow<FuturesTick> {
-        val flow = MutableStateFlow<FuturesTick?>(null)
-        
-        // ⚠️ MOCK DATA — 期貨模擬報價，生產環境應替換為真實 API 呼叫
-        
-        val basePrice = when (symbol) {
-            "TXF" -> 18000.0
-            "FXF" -> 17000.0
-            else -> 17000.0 + (Math.random() * 500)
+    override fun subscribeFuturesPrice(symbol: String): Flow<FuturesTick> {
+        if (!wsClient.connected) {
+            wsClient.connect()
         }
-        
-        val change = (Math.random() - 0.5) * 50
-        val changePercent = (change / basePrice) * 100
-        
-        val tick = FuturesTick(
-            symbol = symbol,
-            price = basePrice + change,
-            change = change,
-            changePercent = changePercent,
-            volume = (Math.random() * 50000).toLong(),
-            bid = basePrice + change - 1,
-            ask = basePrice + change + 1,
-            tickSize = 1.0,
-            limitUpPrice = basePrice * 1.05,
-            limitDownPrice = basePrice * 0.95,
-            timestamp = System.currentTimeMillis()
-        )
-        
-        flow.value = tick
-        
-        return flow as Flow<FuturesTick>
+        wsClient.subscribe(listOf(symbol))
+
+        return wsClient.futuresQuotesFlow
+            .map { tickMap -> tickMap[symbol.uppercase()] }
+            .filterNotNull()
+            .map { wsTick ->
+                FuturesTick(
+                    symbol = wsTick.symbol,
+                    price = wsTick.last_price,
+                    change = wsTick.change,
+                    changePercent = wsTick.change_percent,
+                    volume = wsTick.volume,
+                    bid = wsTick.bid_price,
+                    ask = wsTick.ask_price,
+                    tickSize = 1.0,   // 期貨預設
+                    limitUpPrice = 0.0,
+                    limitDownPrice = 0.0,
+                    timestamp = System.currentTimeMillis()
+                )
+            }
     }
 
     suspend fun getStockPositions(accountId: String): List<Position> = withContext(Dispatchers.IO) {

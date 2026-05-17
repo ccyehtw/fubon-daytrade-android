@@ -3,6 +3,10 @@ package com.fubon.daytrade.data.repository
 import com.fubon.daytrade.data.model.AccountInfo
 import com.fubon.daytrade.data.model.LoginResult
 import com.fubon.daytrade.domain.model.Position
+import com.fubon.daytrade.data.network.WebSocketClient
+import com.fubon.daytrade.data.network.WsStockTick
+import com.fubon.daytrade.data.network.WsFuturesTick
+import kotlinx.coroutines.flow.Flow
 
 interface FubonRepository {
     suspend fun login(
@@ -32,15 +36,21 @@ interface FubonRepository {
         buySell: String
     ): Result<String>
 
-    suspend fun subscribeStockPrice(symbol: String): Flow<StockTick>
+    /** 訂閱股票報價（透過 WebSocket 即時接收） */
+    fun subscribeStockPrice(symbol: String): Flow<StockTick>
 
-    suspend fun subscribeFuturesPrice(symbol: String): Flow<FuturesTick>
+    /** 訂閱期貨報價（透過 WebSocket 即時接收） */
+    fun subscribeFuturesPrice(symbol: String): Flow<FuturesTick>
+
+    /** 取得 WebSocket 客戶端（用於直接管理連線生命週期） */
+    fun getWebSocketClient(): WebSocketClient
 
     suspend fun getStockPositions(accountId: String): List<Position>
 
     suspend fun getFuturesPositions(accountId: String): List<Position>
 }
 
+/** 股票 Tick（Repository 層內部使用） */
 data class StockTick(
     val symbol: String,
     val price: Double,
@@ -55,6 +65,7 @@ data class StockTick(
     val timestamp: Long
 )
 
+/** 期貨 Tick（Repository 層內部使用） */
 data class FuturesTick(
     val symbol: String,
     val price: Double,
