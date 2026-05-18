@@ -276,7 +276,7 @@ class WebSocketClient(
 
     private suspend fun handleMessage(text: String) {
         try {
-            val json = JsonParser.parseString(text).asJsonObject
+            val json = JsonParser().parse(text).asJsonObject
             val event = json.get("event")?.asString ?: return
 
             when (event) {
@@ -288,39 +288,40 @@ class WebSocketClient(
 
                 "quote" -> {
                     val data = json.getAsJsonObject("data")
-                    val symbol = data.get("symbol")?.asString ?: return
-                    val name = data.get("name")?.asString ?: symbol
+                    val symbol = data.get("symbol")?.asString?.toString() ?: return
+                    val name = data.get("name")?.asString?.toString() ?: symbol
 
                     // 嘗試解析為股票或期貨報價
                     // 期貨有 "change" / "change_percent" 且 symbol 以 TXF/MXF 等開頭
-                    val isFutures = symbol.uppercase(Locale.ROOT).startsWith("TXF") ||
-                            symbol.uppercase(Locale.ROOT).startsWith("MXF") ||
-                            symbol.uppercase(Locale.ROOT).startsWith("EXF") ||
-                            symbol.uppercase(Locale.ROOT).startsWith("FEF") ||
-                            symbol.uppercase(Locale.ROOT).startsWith("TXO")
+                    val sym = symbol.uppercase(Locale.ROOT)
+                    val isFutures = sym.startsWith("TXF") ||
+                            sym.startsWith("MXF") ||
+                            sym.startsWith("EXF") ||
+                            sym.startsWith("FEF") ||
+                            sym.startsWith("TXO")
 
                     if (isFutures) {
                         val tick = parseFuturesTick(data, symbol, name)
                         _futuresQuotesFlow.value = _futuresQuotesFlow.value.toMutableMap().apply {
-                            put(symbol.uppercase(Locale.ROOT), tick)
+                            put(sym, tick)
                         }
-                        _eventsFlow.emit(WsEvent.Quote(symbol.uppercase(Locale.ROOT), futuresTick = tick))
+                        _eventsFlow.emit(WsEvent.Quote(sym, futuresTick = tick))
                     } else {
                         val tick = parseStockTick(data, symbol, name)
                         _stockQuotesFlow.value = _stockQuotesFlow.value.toMutableMap().apply {
-                            put(symbol.uppercase(Locale.ROOT), tick)
+                            put(sym, tick)
                         }
-                        _eventsFlow.emit(WsEvent.Quote(symbol.uppercase(Locale.ROOT), stockTick = tick))
+                        _eventsFlow.emit(WsEvent.Quote(sym, stockTick = tick))
                     }
                 }
 
                 "order_update" -> {
-                    val data = json.getAsJsonObject("data")?.asMap<String, JsonElement>() ?: emptyMap()
+                    val data = json.getAsJsonObject("data")?.asMap() ?: emptyMap()
                     _eventsFlow.emit(WsEvent.OrderUpdate(data))
                 }
 
                 "condition_triggered" -> {
-                    val data = json.getAsJsonObject("data")?.asMap<String, JsonElement>() ?: emptyMap()
+                    val data = json.getAsJsonObject("data")?.asMap() ?: emptyMap()
                     _eventsFlow.emit(WsEvent.ConditionTriggered(data))
                 }
 

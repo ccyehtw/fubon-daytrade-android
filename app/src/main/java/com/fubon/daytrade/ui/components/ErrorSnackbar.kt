@@ -96,8 +96,10 @@ class ErrorSnackbarHelper(
                 duration = SnackbarDuration.Short
             )
             
-            if (snackbarResult.actionPerformed) {
-                onRetry?.invoke()
+            @Suppress("DEPRECATION")
+            when (snackbarResult) {
+                androidx.compose.material3.SnackbarResult.ActionClicked -> onRetry?.invoke()
+                else -> {} // dismissed or unknown
             }
         }
     }
