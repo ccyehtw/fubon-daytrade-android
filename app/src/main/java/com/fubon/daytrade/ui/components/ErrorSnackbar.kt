@@ -96,9 +96,8 @@ class ErrorSnackbarHelper(
                 duration = SnackbarDuration.Short
             )
             
-            when (snackbarResult) {
-                is androidx.compose.material3.SnackbarResult.ActionClicked -> onRetry?.invoke()
-                else -> {}
+            if (snackbarResult.actionPerformed) {
+                onRetry?.invoke()
             }
         }
     }

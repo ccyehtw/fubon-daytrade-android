@@ -52,6 +52,7 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -1171,7 +1172,7 @@ private fun FuturesOrderStatusList(
                 fontWeight = FontWeight.Bold
             )
             Spacer(modifier = Modifier.height(8.dp))
-            orderStatuses.values.takeLast(5).reversed().forEach { item: OrderStatusItem ->
+            orderStatuses.values.toList().takeLast(5).reversed().forEach { item ->
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()

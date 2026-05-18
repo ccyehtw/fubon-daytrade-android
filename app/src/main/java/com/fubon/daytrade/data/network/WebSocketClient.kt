@@ -2,6 +2,7 @@ package com.fubon.daytrade.data.network
 
 import android.util.Log
 import com.google.gson.Gson
+import com.google.gson.JsonElement
 import com.google.gson.JsonParser
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers

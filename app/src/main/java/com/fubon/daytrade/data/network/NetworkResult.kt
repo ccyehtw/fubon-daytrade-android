@@ -50,7 +50,7 @@ sealed class NetworkResult<out T> {
         is Success -> Success(transform(data))
         is Error -> this
         is NetworkError -> this
-        Timeout -> this
+        is Timeout -> this
     }
     
     /**
