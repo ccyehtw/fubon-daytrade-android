@@ -33,9 +33,12 @@ app = FastAPI(title="Fubon DayTrade Service", version="1.1.0")
 
 # CORS 設定：僅允許已知 Android App origins（防止惡意網站盜用認證）
 # 生產環境應設為 app 的實際 origin，開發環境可用 ["http://localhost:*"]
-# Fix #8: 過濾空白字串，確保沒有空字串被允許
+# ⚠️ 注意：「localhost:*」是 FastAPI CORSMiddleware 的 literal string（不支援 glob/wildcard），
+# 因此「http://localhost:*」不會匹配「http://localhost:8080」——這是安全默認行為。
+# Fix #8: 過濾空白字串，拒絕萬用字串 "*"（防止意外允許所有 origin）
 _origins_raw = os.environ.get("ALLOWED_ORIGINS", "http://localhost:*,http://10.0.2.2:*,http://127.0.0.1:*")
-ALLOWED_ORIGINS = [o.strip() for o in _origins_raw.split(",") if o.strip()]
+_allowed = [o.strip() for o in _origins_raw.split(",") if o.strip()]
+ALLOWED_ORIGINS = [o for o in _allowed if o != "*"]
 if not ALLOWED_ORIGINS:
     ALLOWED_ORIGINS = ["http://localhost:*"]  # 安全默认值
 
@@ -270,7 +273,7 @@ async def sdk_login(personal_id: str, api_key: str, cert_path: str, cert_passwor
         masked_pid = personal_id[0] + "***" + personal_id[-2:] if len(personal_id) > 4 else "***"
         logger.info(f"嘗試登入: personal_id={masked_pid}, api_key=***, cert_path={cert_path}")
         result = sdk.apikey_login(personal_id, api_key, cert_path, password)
-        logger.info(f"Login result: {result}")
+        logger.info(f"登入結果: is_success={result.is_success}, message={result.message}")
 
         if not result.is_success:
             return LoginResponse(

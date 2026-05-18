@@ -263,14 +263,15 @@ def cancel_futures_order(order_id: str) -> Dict[str, Any]:
         dict — 取消結果
     """
     if not _sdk:
-        return _mock_cancel(order_id)
+        return {"success": False, "message": "SDK not initialized"}
 
     try:
-        # 需有期貨帳號才能取消，先用 mock
-        return _mock_cancel(order_id)
+        # TODO: 實作真實取消邏輯（需期貨帳號資訊）
+        # 現階段標記為不支援，避免回傳 mock 造成_scheduler誤判
+        return {"success": False, "message": "取消功能尚未支援"}
     except Exception as e:
         logger.error(f"cancel_futures_order error: {e}")
-        return _mock_cancel(order_id)
+        return {"success": False, "message": str(e)}
 
 
 def _mock_cancel(order_id: str) -> Dict[str, Any]:
