@@ -1,5 +1,7 @@
 package com.fubon.daytrade.ui.screens
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -37,6 +39,16 @@ fun LoginScreen(
     viewModel: LoginViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
+
+    // File picker for .p12 certificates
+    val certFileLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        uri?.let {
+            val fileName = it.lastPathSegment ?: "certificate.p12"
+            viewModel.selectCertFile(it, fileName)
+        }
+    }
 
     // 觀測 isLoginSuccess 來觸發跳轉，而非同步檢查 login() 回傳值
     LaunchedEffect(uiState.isLoginSuccess) {
@@ -118,9 +130,11 @@ fun LoginScreen(
                     enabled = !uiState.isLoading
                 )
 
-                @Suppress("UNUSED_PARAMETER")
                 OutlinedButton(
-                    onClick = { /* File picker launcher not yet implemented - cert selection via login form */ },
+                    onClick = {
+                        // Open document picker for .p12 certificate files
+                        certFileLauncher.launch(arrayOf("application/x-pkcs12", "application/octet-stream"))
+                    },
                     modifier = Modifier.fillMaxWidth(),
                     enabled = !uiState.isLoading
                 ) {
