@@ -95,11 +95,12 @@ class ErrorSnackbarHelper(
                 actionLabel = if (shouldShowRetry) actionLabel else null,
                 duration = SnackbarDuration.Short
             )
-            
-            @Suppress("DEPRECATION")
-            when (snackbarResult) {
-                androidx.compose.material3.SnackbarResult.ActionClicked -> onRetry?.invoke()
-                else -> {} // dismissed or unknown
+
+            // actionLabel is only set when shouldShowRetry=true, so if snackbar
+            // was dismissed by action (not by swipe/timeout), invoke onRetry.
+            // SnackbarResult is Sealed (ActionClicked/Dismissed) in BOM 2024.02+.
+            if (shouldShowRetry && snackbarResult == androidx.compose.material3.SnackbarResult.ActionClicked) {
+                onRetry?.invoke()
             }
         }
     }
