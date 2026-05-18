@@ -58,7 +58,7 @@ class FubonClient:
             List[FubonAccount] — 所有登入帳號（含證券 / 期貨）
         """
         logger.info(f"嘗試登入富邦 API，personal_id={personal_id}")
-        accounts_resp = self._sdk.login(personal_id, api_key, cert_path, cert_pass)
+        accounts_resp = self._sdk.apikey_login(personal_id, api_key, cert_path, cert_pass)
 
         if not accounts_resp.is_success:
             raise RuntimeError(

@@ -390,7 +390,13 @@ def get_futures_positions() -> Dict[str, Any]:
         }
     except Exception as e:
         logger.error(f"get_futures_positions error: {e}")
-        return {"success": False, "message": str(e)}
+        # 🔴 Fix #3: 例外時不回 mock，回傳錯誤訊息（移除內部路徑）
+        #           防止 Scheduler 用假倉位發真實平倉單
+        import re as _re
+        msg = _re.sub(r'["\'].*?[/\\]\S+[/\\]\S+["\']', '[internal]', str(e))
+        msg = _re.sub(r'[A-Z]:\\[^\s"\'`]+', '[internal]', msg)
+        msg = _re.sub(r'/[^\s"\'`]+', '[internal]', msg)
+        return {"success": False, "message": msg[:100]}
 
 
 def _mock_futures_positions() -> Dict[str, Any]:

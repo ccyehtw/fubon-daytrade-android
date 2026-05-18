@@ -19,7 +19,7 @@ data class LoginUiState(
     val certPath: Uri? = null,
     val certFileName: String? = null,
     val isLoading: Boolean = false,
-    val isLoginSuccess: Boolean = false,  // 登入成功事件
+    val isLoginSuccess: Boolean = false,  // 登入成功事件（需在離開頁面後重置）
     val errorMessage: String? = null,
     val personalIdError: String? = null,
     val apiKeyError: String? = null
@@ -104,6 +104,17 @@ class LoginViewModel @Inject constructor(
         }
 
         return true
+    }
+
+    /** 登出或離開登入頁後重置狀態，防止重新進入時 still isLoginSuccess=true */
+    fun resetLoginState() {
+        _uiState.update {
+            it.copy(
+                isLoginSuccess = false,
+                isLoading = false,
+                errorMessage = null
+            )
+        }
     }
 
     private fun validatePersonalId(value: String): String? {

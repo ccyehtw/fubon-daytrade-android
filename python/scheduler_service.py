@@ -151,18 +151,22 @@ class SchedulerService:
     # ──────────────────────────────────────────────
 
     def _job_pre_market_condition_scan(self):
-        """08:30 盤前條件單預掃"""
+        """08:30 盤前條件單預掃
+
+        注意：條件單評估需要即時報價（symbol + last_price），
+        盤前無報價資料，直接跳過。等 09:00 開盤後由 quotes 推送
+        評估。
+        """
         if not self.is_trading_day():
-            logger.debug("非交易日，跳過盤前條件單掃描")
+            logger.debug("非交易日，跳過盤前條件單預掃")
             return
 
         logger.info("[Scheduler] 執行盤前條件單預掃 (08:30)")
         try:
             if self._condition_engine is not None:
-                # 預掃邏輯：evaluate_all_conditions() 依 symbol 比對條件單，
-                # 傳入 {} 會導致 symbol=None，直接回傳 []（空結果）。
-                # 盤前預掃需要「對每個 symbol 餵入昨日收盤價」才能正確評估。
-                # 目前限制：盤前預掃無法在無即時報價時執行（需 market open 後才有效）。
+                # 盤前預掃需要「對每個 symbol 餵入昨日收盤價」才能正確評估，
+                # 目前無昨收資料，直接跳過。
+                # 等 09:00 开盤後，quotes 推送會自動評估所有條件單。
                 logger.info("[Scheduler] 盤前條件單預掃已跳過（需即時報價，9:00 开盤後自動評估）")
             else:
                 logger.warning("[Scheduler] ConditionEngine 未注入，跳過")
