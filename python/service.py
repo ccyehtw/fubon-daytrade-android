@@ -216,17 +216,6 @@ class StockPnlRequest(BaseModel):
     """計算持倉損益"""
     account_id: str   # 必填：帳號驗證（防止他人查閱）
 
-class StockEntryRequest(BaseModel):
-    symbol: str = Field(..., pattern=r"^\d{4}$")   # 股票：4 位數字
-    entry_mode: str = "breakdown_buy"   # "breakdown_buy" | "breakout_sell"
-    price: float
-    quantity: int
-    stop_loss_pct: float = 2.0
-    track_levels: int = 1
-    product_type: str = "stock"
-    account_id: str = ""
-    tick_size: float = 0.1
-
 
 class FuturesOrderRequest(BaseModel):
     # 支援 account (舊) 和 account_id (新) 兩種命名

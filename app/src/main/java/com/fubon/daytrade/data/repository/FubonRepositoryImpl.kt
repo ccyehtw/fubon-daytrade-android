@@ -144,6 +144,7 @@ class FubonRepositoryImpl @Inject constructor(
     }
 
     override suspend fun getAccounts(): List<AccountInfo> {
+        val json = prefs.getString("accounts", null)
         return if (json != null) {
             val type = object : TypeToken<List<AccountInfo>>() {}.type
             gson.fromJson(json, type)

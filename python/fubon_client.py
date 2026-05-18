@@ -71,8 +71,10 @@ class FubonClient:
             # 根據帳號格式自動識別證券或期貨帳號
             # 證券格式: 4數字+斜線+英文+數字 (例: 1247180/futopt/15901)
             # 期貨帳號包含 futopt/fut/future 等關鍵字
+            # 期貨帳號包含 futopt/fut/future 等關鍵字（使用 word boundary 防止誤判）
+            import re
             acct_str = str(acct)
-            if "futopt" in acct_str.lower() or "fut" in acct_str.lower() or "future" in acct_str.lower():
+            if re.search(r'\bfutopt\b|\bfut\b|\bfuture\b', acct_str.lower(), re.IGNORECASE):
                 acct_type = "futures"
             else:
                 acct_type = "securities"

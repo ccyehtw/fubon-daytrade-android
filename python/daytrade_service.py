@@ -120,8 +120,8 @@ class DayTradeService:
             if not re.match(r"^\d{4}$", symbol):
                 return {"success": False, "message": f"股票代碼格式錯誤：{symbol}（需為 4 位數字）"}
         else:
-            if not re.match(r"^[A-Z]{2,4}\d{4,6}$", symbol):
-                return {"success": False, "message": f"期貨代碼格式錯誤：{symbol}（如 TXF202506）"}
+            if not re.match(r"^[A-Z]{2,10}[A-Z0-9]*$", symbol):
+                return {"success": False, "message": f"期貨代碼格式錯誤：{symbol}（如 TXF202506、TXO20200R6）"}
 
         with self._lock:
             # 若已有相同 symbol 的未平倉，先警告
@@ -380,7 +380,6 @@ class DayTradeService:
             "entry_time": pos.entry_time.isoformat() if pos.entry_time else None,
             "close_price": pos.highest_since_entry if pos.entry_mode == EntryMode.BREAKDOWN_BUY else pos.lowest_since_entry,
             "quantity": pos.quantity,
-            "entry_time": pos.entry_time.isoformat() if pos.entry_time else None,
             "close_time": datetime.now().isoformat(),
             "realized_pnl": 0.0,  # 強制平倉不計算損益（無實際成交）
             "close_reason": reason,
