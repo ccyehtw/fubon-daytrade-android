@@ -131,7 +131,7 @@ object RetryHelper {
     /**
      * Convenience function for executing trading operations with appropriate retry settings.
      */
-    suspend inline fun <T> retryTradingOperation(
+    suspend fun <T> retryTradingOperation(
         operation: suspend () -> NetworkResult<T>
     ): NetworkResult<T> {
         return retryWithExponentialBackoff(
@@ -144,7 +144,7 @@ object RetryHelper {
     /**
      * Convenience function for executing quote operations with fast retry settings.
      */
-    suspend inline fun <T> retryQuoteOperation(
+    suspend fun <T> retryQuoteOperation(
         operation: suspend () -> NetworkResult<T>
     ): NetworkResult<T> {
         return retryWithExponentialBackoff(

@@ -223,8 +223,8 @@ class FuturesViewModel @Inject constructor(
                                     bid = tick.bid_price,
                                     ask = tick.ask_price,
                                     tickSize = 1.0,  // 期貨預設 1 點
-                                    limitUpPrice = tick.limit_up_price,
-                                    limitDownPrice = tick.limit_down_price,
+                                    limitUpPrice = 0.0,
+                                    limitDownPrice = 0.0,
                                     timestamp = System.currentTimeMillis()
                                 ),
                                 isQuoteLoading = false
@@ -259,7 +259,7 @@ class FuturesViewModel @Inject constructor(
     // 保證金檢查
     // ──────────────────────────────────────────────────────────
 
-    private fun checkMargin() {
+    fun checkMargin() {
         viewModelScope.launch {
             val account = _uiState.value.currentAccount ?: return@launch
             try {

@@ -215,7 +215,8 @@ fun OrderPanel(
                     QuickQuantityButton(
                         quantity = qty,
                         onClick = { quantityText = qty.toString() },
-                        enabled = !isLoading
+                        enabled = !isLoading,
+                        modifier = Modifier.weight(1f)
                     )
                 }
             }
@@ -223,6 +224,7 @@ fun OrderPanel(
     }
 }
 
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 private fun DualModeSelector(
     selected: EntryMode,
@@ -381,12 +383,13 @@ private fun StopLossSlider(
 private fun QuickQuantityButton(
     quantity: Int,
     onClick: () -> Unit,
-    enabled: Boolean
+    enabled: Boolean,
+    modifier: Modifier = Modifier
 ) {
     Button(
         onClick = onClick,
         enabled = enabled,
-        modifier = Modifier.weight(1f),
+        modifier = modifier.fillMaxWidth(),
         colors = ButtonDefaults.buttonColors(
             containerColor = MaterialTheme.colorScheme.secondaryContainer,
             contentColor = MaterialTheme.colorScheme.onSecondaryContainer

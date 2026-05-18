@@ -21,6 +21,7 @@ import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
+import java.util.Locale
 import java.util.concurrent.TimeUnit
 
 /**
@@ -291,34 +292,34 @@ class WebSocketClient(
 
                     // 嘗試解析為股票或期貨報價
                     // 期貨有 "change" / "change_percent" 且 symbol 以 TXF/MXF 等開頭
-                    val isFutures = symbol.uppercase().startsWith("TXF") ||
-                            symbol.uppercase().startsWith("MXF") ||
-                            symbol.uppercase().startsWith("EXF") ||
-                            symbol.uppercase().startsWith("FEF") ||
-                            symbol.uppercase().startsWith("TXO")
+                    val isFutures = symbol.uppercase(Locale.ROOT).startsWith("TXF") ||
+                            symbol.uppercase(Locale.ROOT).startsWith("MXF") ||
+                            symbol.uppercase(Locale.ROOT).startsWith("EXF") ||
+                            symbol.uppercase(Locale.ROOT).startsWith("FEF") ||
+                            symbol.uppercase(Locale.ROOT).startsWith("TXO")
 
                     if (isFutures) {
                         val tick = parseFuturesTick(data, symbol, name)
                         _futuresQuotesFlow.value = _futuresQuotesFlow.value.toMutableMap().apply {
-                            put(symbol.uppercase(), tick)
+                            put(symbol.uppercase(Locale.ROOT), tick)
                         }
-                        _eventsFlow.emit(WsEvent.Quote(symbol.uppercase(), futuresTick = tick))
+                        _eventsFlow.emit(WsEvent.Quote(symbol.uppercase(Locale.ROOT), futuresTick = tick))
                     } else {
                         val tick = parseStockTick(data, symbol, name)
                         _stockQuotesFlow.value = _stockQuotesFlow.value.toMutableMap().apply {
-                            put(symbol.uppercase(), tick)
+                            put(symbol.uppercase(Locale.ROOT), tick)
                         }
-                        _eventsFlow.emit(WsEvent.Quote(symbol.uppercase(), stockTick = tick))
+                        _eventsFlow.emit(WsEvent.Quote(symbol.uppercase(Locale.ROOT), stockTick = tick))
                     }
                 }
 
                 "order_update" -> {
-                    val data = json.getAsJsonObject("data")?.asMap() ?: emptyMap()
+                    val data = json.getAsJsonObject("data")?.asMap<String, JsonElement>() ?: emptyMap()
                     _eventsFlow.emit(WsEvent.OrderUpdate(data))
                 }
 
                 "condition_triggered" -> {
-                    val data = json.getAsJsonObject("data")?.asMap() ?: emptyMap()
+                    val data = json.getAsJsonObject("data")?.asMap<String, JsonElement>() ?: emptyMap()
                     _eventsFlow.emit(WsEvent.ConditionTriggered(data))
                 }
 

@@ -77,7 +77,7 @@ class FubonRepositoryImpl @Inject constructor(
             is NetworkResult.Success -> Result.success(networkResult.data)
             is NetworkResult.Error -> Result.failure(Exception(networkResult.message))
             is NetworkResult.NetworkError -> Result.failure(Exception("網路連線失敗: ${networkResult.exception.message}"))
-            is NetworkResult.TimeoutError -> Result.failure(Exception("連線逾時，請稍後再試"))
+            is NetworkResult.Timeout -> Result.failure(Exception("連線逾時，請稍後再試"))
         }
     }
     
@@ -116,15 +116,15 @@ class FubonRepositoryImpl @Inject constructor(
                         NetworkResult.Success(accounts)
                     } else {
                         // 401/403 are not retriable - bad credentials
-                        NetworkResult.Error(result.message ?: "登入失敗", response.code())
+                        NetworkResult.Error(result.message ?: "登入失敗", response.code)
                     }
                 } else {
                     // 401/403 not retriable, 429 rate limited not retriable with backoff
                     if (response.code in listOf(401, 403, 422, 429)) {
-                        NetworkResult.Error("HTTP ${response.code}: ${response.message}", response.code())
+                        NetworkResult.Error("HTTP ${response.code}: ${response.message}", response.code)
                     } else {
                         // 500, 502, 503, 504 are retriable
-                        NetworkResult.Error("HTTP ${response.code}: ${response.message}", response.code())
+                        NetworkResult.Error("HTTP ${response.code}: ${response.message}", response.code)
                     }
                 }
             }
@@ -169,7 +169,7 @@ class FubonRepositoryImpl @Inject constructor(
             is NetworkResult.Success -> Result.success(networkResult.data)
             is NetworkResult.Error -> Result.failure(Exception(networkResult.message))
             is NetworkResult.NetworkError -> Result.failure(Exception("網路連線失敗: ${networkResult.exception.message}"))
-            is NetworkResult.TimeoutError -> Result.failure(Exception("連線逾時，請稍後再試"))
+            is NetworkResult.Timeout -> Result.failure(Exception("連線逾時，請稍後再試"))
         }
     }
     
@@ -203,10 +203,10 @@ class FubonRepositoryImpl @Inject constructor(
                     if (result.isSuccess) {
                         NetworkResult.Success(result.orderId ?: "ORDER_SUCCESS")
                     } else {
-                        NetworkResult.Error(result.message ?: "下單失敗", response.code())
+                        NetworkResult.Error(result.message ?: "下單失敗", response.code)
                     }
                 } else {
-                    NetworkResult.Error("HTTP ${response.code}: ${response.message}", response.code())
+                    NetworkResult.Error("HTTP ${response.code}: ${response.message}", response.code)
                 }
             }
         } catch (e: IOException) {
@@ -235,7 +235,7 @@ class FubonRepositoryImpl @Inject constructor(
             is NetworkResult.Success -> Result.success(networkResult.data)
             is NetworkResult.Error -> Result.failure(Exception(networkResult.message))
             is NetworkResult.NetworkError -> Result.failure(Exception("網路連線失敗: ${networkResult.exception.message}"))
-            is NetworkResult.TimeoutError -> Result.failure(Exception("連線逾時，請稍後再試"))
+            is NetworkResult.Timeout -> Result.failure(Exception("連線逾時，請稍後再試"))
         }
     }
     
@@ -277,10 +277,10 @@ class FubonRepositoryImpl @Inject constructor(
                     if (result.isSuccess) {
                         NetworkResult.Success(result.orderId ?: "ORDER_SUCCESS")
                     } else {
-                        NetworkResult.Error(result.message ?: "下單失敗", response.code())
+                        NetworkResult.Error(result.message ?: "下單失敗", response.code)
                     }
                 } else {
-                    NetworkResult.Error("HTTP ${response.code}: ${response.message}", response.code())
+                    NetworkResult.Error("HTTP ${response.code}: ${response.message}", response.code)
                 }
             }
         } catch (e: IOException) {
@@ -474,7 +474,7 @@ class FubonRepositoryImpl @Inject constructor(
 
             val request = Request.Builder()
                 .url("$baseUrl/stock/entry")
-                .post(RequestBody.create("application/json".toMediaType(), json))
+                .post(json.toRequestBody("application/json".toMediaType()))
                 .build()
 
             client.newCall(request).execute().use { response ->

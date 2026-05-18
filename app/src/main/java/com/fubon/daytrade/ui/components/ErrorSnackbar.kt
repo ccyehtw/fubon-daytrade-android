@@ -96,8 +96,9 @@ class ErrorSnackbarHelper(
                 duration = SnackbarDuration.Short
             )
             
-            if (snackbarResult == androidx.compose.material3.SnackbarResult.ActionClicked) {
-                onRetry?.invoke()
+            when (snackbarResult) {
+                is androidx.compose.material3.SnackbarResult.ActionClicked -> onRetry?.invoke()
+                else -> {}
             }
         }
     }
@@ -118,47 +119,41 @@ class ErrorSnackbarHelper(
 /**
  * Returns a user-friendly error message based on error type.
  */
-@Composable
-private fun getErrorMessage(errorType: ErrorType): String {
-    return when (errorType) {
-        is ErrorType.Network -> "網路連線異常，請稍後再試"
-        is ErrorType.Timeout -> "連線逾時，請稍後再試"
-        is ErrorType.Api -> errorType.message
-        is ErrorType.Unknown -> "發生錯誤，請稍後再試"
-    }
+private fun getErrorMessage(errorType: ErrorType): String = when (errorType) {
+    is ErrorType.Network -> "網路連線異常，請稍後再試"
+    is ErrorType.Timeout -> "連線逾時，請稍後再試"
+    is ErrorType.Api -> errorType.message
+    is ErrorType.Unknown -> "發生錯誤，請稍後再試"
 }
 
 /**
  * Determines whether the retry action should be shown based on error type.
- * 
+ *
  * Retry is shown for:
  * - Network errors (user can check connectivity)
  * - Timeout errors (temporary server issues)
- * 
+ *
  * Retry is NOT shown for:
  * - API errors with 401/403 (need re-authentication)
  * - API errors with 422 (bad input, retry won't help)
  * - API errors with 404 (resource doesn't exist)
  * - Unknown errors
  */
-@Composable
-private fun shouldShowRetryAction(errorType: ErrorType): Boolean {
-    return when (errorType) {
-        is ErrorType.Network -> true
-        is ErrorType.Timeout -> true
-        is ErrorType.Api -> when (errorType.code) {
-            // Don't show retry for auth errors - user needs to re-login
-            401, 403 -> false
-            // Don't show retry for bad input - user needs to fix data
-            422 -> false
-            // Don't show retry for not found - resource doesn't exist
-            404 -> false
-            // Show retry for server errors - might be transient
-            in 500..599 -> true
-            else -> false
-        }
-        is ErrorType.Unknown -> false
+private fun shouldShowRetryAction(errorType: ErrorType): Boolean = when (errorType) {
+    is ErrorType.Network -> true
+    is ErrorType.Timeout -> true
+    is ErrorType.Api -> when (errorType.code) {
+        // Don't show retry for auth errors - user needs to re-login
+        401, 403 -> false
+        // Don't show retry for bad input - user needs to fix data
+        422 -> false
+        // Don't show retry for not found - resource doesn't exist
+        404 -> false
+        // Show retry for server errors - might be transient
+        in 500..599 -> true
+        else -> false
     }
+    is ErrorType.Unknown -> false
 }
 
 /**
@@ -174,8 +169,7 @@ fun ErrorSnackbar(
     Snackbar(
         modifier = modifier.padding(16.dp),
         containerColor = MaterialTheme.colorScheme.errorContainer,
-        contentColor = MaterialTheme.colorScheme.onErrorContainer,
-        actionColor = MaterialTheme.colorScheme.error
+        contentColor = MaterialTheme.colorScheme.onErrorContainer
     ) {
         Row(
             modifier = Modifier,

@@ -56,7 +56,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.fubon.daytrade.data.network.OrderStatus
-import com.fubon.daytrade.data.network.OrderStatusItem
+import com.fubon.daytrade.ui.viewmodel.OrderStatusItem
 import com.fubon.daytrade.domain.model.BuySell
 import com.fubon.daytrade.ui.theme.LimitDownBlue
 import com.fubon.daytrade.ui.theme.LimitUpRed
@@ -633,6 +633,7 @@ private fun FuturesQuoteCard(
 // 組件：期貨下單面板（雙模式）
 // ══════════════════════════════════════════════════════════════
 
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 private fun FuturesOrderPanel(
     tick: com.fubon.daytrade.ui.viewmodel.FuturesTick,
@@ -1111,18 +1112,24 @@ private fun DeadlineReminder() {
 // 灰=待成交 / 藍=部分成交 / 綠=已成交 / 黃=已取消 / 紅=失敗
 // ══════════════════════════════════════════════════════════════
 
+private data class BadgeColors(
+    val backgroundColor: Color,
+    val textColor: Color,
+    val label: String
+)
+
 @Composable
 fun OrderStatusBadge(
     status: OrderStatus,
     modifier: Modifier = Modifier
 ) {
     val (backgroundColor, textColor, label) = when (status) {
-        OrderStatus.Pending -> MaterialTheme.colorScheme.surfaceVariant to MaterialTheme.colorScheme.onSurfaceVariant to "待成交"
-        OrderStatus.PartiallyFilled -> LimitDownBlue.copy(alpha = 0.15f) to LimitDownBlue to "部分成交"
-        OrderStatus.Filled -> StockUp.copy(alpha = 0.15f) to StockUp to "已成交"
-        OrderStatus.Cancelled -> androidx.compose.ui.graphics.Color(0xFFFFC107).copy(alpha = 0.15f) to androidx.compose.ui.graphics.Color(0xFFFFC107) to "已取消"
-        OrderStatus.Failed, OrderStatus.Rejected -> LimitUpRed.copy(alpha = 0.15f) to LimitUpRed to "失敗"
-        OrderStatus.Unknown -> MaterialTheme.colorScheme.outline.copy(alpha = 0.3f) to MaterialTheme.colorScheme.outline to "未知"
+        OrderStatus.Pending -> BadgeColors(MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.colorScheme.onSurfaceVariant, "待成交")
+        OrderStatus.PartiallyFilled -> BadgeColors(LimitDownBlue.copy(alpha = 0.15f), LimitDownBlue, "部分成交")
+        OrderStatus.Filled -> BadgeColors(StockUp.copy(alpha = 0.15f), StockUp, "已成交")
+        OrderStatus.Cancelled -> BadgeColors(Color(0xFFFFC107).copy(alpha = 0.15f), Color(0xFFFFC107), "已取消")
+        OrderStatus.Failed, OrderStatus.Rejected -> BadgeColors(LimitUpRed.copy(alpha = 0.15f), LimitUpRed, "失敗")
+        OrderStatus.Unknown -> BadgeColors(MaterialTheme.colorScheme.outline.copy(alpha = 0.3f), MaterialTheme.colorScheme.outline, "未知")
     }
 
     Box(
@@ -1164,7 +1171,7 @@ private fun FuturesOrderStatusList(
                 fontWeight = FontWeight.Bold
             )
             Spacer(modifier = Modifier.height(8.dp))
-            orderStatuses.values.takeLast(5).reversed().forEach { item ->
+            orderStatuses.values.takeLast(5).reversed().forEach { item: OrderStatusItem ->
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
