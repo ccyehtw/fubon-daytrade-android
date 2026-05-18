@@ -89,10 +89,6 @@ def verify_api_key(x_api_key: Optional[str] = Header(None)) -> str:
     """驗證 API Key。PRODUCTION 模式下（已設定 ALLOWED_API_KEYS）必須提供有效 key。"""
     if not _ALLOWED_API_KEYS and not _BACKUP_API_KEY:
         _load_api_keys()
-    if not _ALLOWED_API_KEYS and not _BACKUP_API_KEY:
-        # 無 key 配置：允許 development 模式通過（風險由部署者承擔）
-        # ⚠️  嚴格 production 部署應確保已設定 API key
-        return "dev-mode"
     if not x_api_key:
         raise HTTPException(status_code=401, detail="Missing X-API-Key header")
     if x_api_key in _ALLOWED_API_KEYS or x_api_key == _BACKUP_API_KEY:
@@ -222,7 +218,7 @@ class FuturesOrderRequest(BaseModel):
     account: Optional[str] = None
     account_id: Optional[str] = None
     futures_code: Optional[str] = None  # 舊命名（向後相容）
-    symbol: Optional[str] = Field(None, pattern=r"^[A-Z]{2,10}[A-Z0-9]*$")  # 新命名（通用代碼，彈性接受各種格式）
+    symbol: Optional[str] = Field(None, pattern=r"^[A-Z]{2,4}(\d{6,7}|[A-Z]?\d{5,7}[A-Z]?)$")  # 期貨代碼：TXF202506/MXF202506/TXO20200R6
     price: Optional[float] = None       # 委託價格（None = 市價）
     quantity: int = 1
     bs: Optional[str] = None           # 舊版期貨下單（"buy" | "sell"）
@@ -518,8 +514,12 @@ async def stock_pnl(req: StockPnlRequest):
     計算所有持倉的未實現 + 已實現損益
 
     POST /stock/pnl
-    Body: {"prices": {"2330": 610.0, "2317": 105.5}}
+    Body: {"account_id": "191392", "prices": {"2330": 610.0, "2317": 105.5}}
     """
+    # 驗證 account_id 確實屬於已登入帳戶（防止橫向權限攻擊）
+    valid_accounts = [acct["account_id"] for acct in accounts_cache if "account_id" in acct]
+    if req.account_id not in valid_accounts:
+        raise HTTPException(status_code=403, detail="account_id not owned by this API key")
     try:
         svc = get_daytrade_service()
         result = svc.calculate_pnl(req.prices)
@@ -1198,8 +1198,7 @@ async def websocket_endpoint(websocket: WebSocket):
         # 立即驗證（不在依賴框架的情況下手動呼叫）
         if not _ALLOWED_API_KEYS and not _BACKUP_API_KEY:
             _load_api_keys()
-        valid = (api_key in _ALLOWED_API_KEYS or api_key == _BACKUP_API_KEY
-                 or (not _ALLOWED_API_KEYS and not _BACKUP_API_KEY))  # dev-mode
+        valid = (api_key in _ALLOWED_API_KEYS or api_key == _BACKUP_API_KEY)
         if not valid:
             await websocket.close(code=1008, reason="Invalid API Key")
             return
@@ -1373,27 +1372,6 @@ async def get_notification_clients():
     """
     manager = get_ws_manager()
     return manager.get_clients_summary()
-
-
-# ══════════════════════════════════════════════════════════════
-# 健康檢查增強
-# ══════════════════════════════════════════════════════════════
-
-@app.get("/health")
-async def health_check():
-    """
-    健康檢查端點
-
-    GET /health
-    Returns: {"status": "healthy", "sdk_ready": bool, "ws_clients": int}
-    """
-    manager = get_ws_manager()
-    return {
-        "status": "healthy",
-        "sdk_ready": sdk is not None,
-        "ws_clients": manager.get_connection_count(),
-        "version": "1.2.0",
-    }
 
 
 # ========== Main ==========

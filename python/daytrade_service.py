@@ -120,7 +120,7 @@ class DayTradeService:
             if not re.match(r"^\d{4}$", symbol):
                 return {"success": False, "message": f"股票代碼格式錯誤：{symbol}（需為 4 位數字）"}
         else:
-            if not re.match(r"^[A-Z]{2,10}[A-Z0-9]*$", symbol):
+            if not re.match(r"^[A-Z]{2,4}(\d{6,7}|[A-Z]?\d{5,7}[A-Z]?)$", symbol):
                 return {"success": False, "message": f"期貨代碼格式錯誤：{symbol}（如 TXF202506、TXO20200R6）"}
 
         with self._lock:
