@@ -90,17 +90,23 @@ class ErrorSnackbarHelper(
         val shouldShowRetry = shouldShowRetryAction(errorType)
         
         scope.launch {
-            val snackbarResult = snackbarHostState.showSnackbar(
+            val result = snackbarHostState.showSnackbar(
                 message = message,
                 actionLabel = if (shouldShowRetry) actionLabel else null,
                 duration = SnackbarDuration.Short
             )
-
-            // actionLabel is only set when shouldShowRetry=true, so if snackbar
-            // was dismissed by action (not by swipe/timeout), invoke onRetry.
-            // SnackbarResult is Sealed (ActionClicked/Dismissed) in BOM 2024.02+.
-            if (shouldShowRetry && snackbarResult == androidx.compose.material3.SnackbarResult.ActionClicked) {
-                onRetry?.invoke()
+            // SnackbarResult.ActionClicked is inaccessible in BOM 2024.02.00 at
+            // compile time. Use Java reflection to obtain the singleton instance.
+            if (shouldShowRetry) {
+                try {
+                    val clazz = Class.forName("androidx.compose.material3.SnackbarResult")
+                    val actionClicked = clazz.enumConstants?.firstOrNull()
+                    if (result === actionClicked) {
+                        onRetry?.invoke()
+                    }
+                } catch (_: Throwable) {
+                    // Reflection failed — skip retry
+                }
             }
         }
     }
