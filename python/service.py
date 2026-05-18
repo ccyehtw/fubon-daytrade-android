@@ -71,11 +71,27 @@ def _load_api_keys():
     _BACKUP_API_KEY = os.environ.get("BACKUP_API_KEY") or None
 
 
+# 輔助：安全的錯誤訊息（不暴露 SDK 內部路徑/變數內容）
+def _safe_error_msg(e: Exception) -> str:
+    """回傳給 client 的錯誤訊息，移除內部路徑/變數內容"""
+    msg = str(e)
+    # 移除常見的 internal path pattern（/opt/, /home/, C:\, "Error()", variable assignments）
+    import re
+    msg = re.sub(r'["\'].*?[/\\]\S+[/\\]\S+["\']', '[internal]', msg)  # paths in quotes
+    msg = re.sub(r'\s+\w+=\S+\s+', ' ', msg)  # var=value patterns
+    msg = re.sub(r'[A-Z]:\\\\[^\s"\'`]+', '[internal]', msg)  # Windows paths
+    msg = re.sub(r'/[^\\s"\'`]+', '[internal]', msg)  # Unix paths
+    # 保留最多前 100 字元
+    return msg[:100]
+
+
 def verify_api_key(x_api_key: Optional[str] = Header(None)) -> str:
-    """驗證 API Key，開發模式無 key 時直接通過"""
+    """驗證 API Key。PRODUCTION 模式下（已設定 ALLOWED_API_KEYS）必須提供有效 key。"""
     if not _ALLOWED_API_KEYS and not _BACKUP_API_KEY:
         _load_api_keys()
     if not _ALLOWED_API_KEYS and not _BACKUP_API_KEY:
+        # 無 key 配置：允許 development 模式通過（風險由部署者承擔）
+        # ⚠️  嚴格 production 部署應確保已設定 API key
         return "dev-mode"
     if not x_api_key:
         raise HTTPException(status_code=401, detail="Missing X-API-Key header")
@@ -337,17 +353,17 @@ async def sdk_login(personal_id: str, api_key: str, cert_path: str, cert_passwor
 
 # ========== API Routes ==========
 
-@app.get("/")
+@app.get("/", dependencies=[Depends(verify_api_key)])
 async def root():
     return {"service": "Fubon DayTrade Service", "status": "running", "version": "1.1.0", "sdk_available": FUBON_SDK_AVAILABLE}
 
 
-@app.get("/health")
+@app.get("/health", dependencies=[Depends(verify_api_key)])
 async def health():
     return {"status": "healthy", "sdk_ready": sdk is not None}
 
 
-@app.post("/api/login")
+@app.post("/api/login", dependencies=[Depends(verify_api_key)])
 async def login(req: LoginRequest):
     """Login endpoint - calls FubonSDK.apikey_login()"""
     result = await sdk_login(
@@ -359,7 +375,7 @@ async def login(req: LoginRequest):
     return result.to_dict()
 
 
-@app.get("/api/accounts")
+@app.get("/api/accounts", dependencies=[Depends(verify_api_key)])
 async def get_accounts():
     """Get cached accounts"""
     return {"accounts": accounts_cache}
@@ -395,7 +411,7 @@ async def stock_entry(req: StockEntryRequest):
         return result
     except Exception as e:
         logger.error(f"/stock/entry error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=_safe_error_msg(e))
 
 
 @app.post("/stock/exit", dependencies=[Depends(verify_api_key)])
@@ -412,7 +428,7 @@ async def stock_exit(req: StockExitRequest):
         return result
     except Exception as e:
         logger.error(f"/stock/exit error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=_safe_error_msg(e))
 
 
 @app.get("/stock/position/{symbol}", dependencies=[Depends(verify_api_key)])
@@ -432,7 +448,7 @@ async def stock_position(symbol: str):
         raise
     except Exception as e:
         logger.error(f"/stock/position error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=_safe_error_msg(e))
 
 
 @app.get("/stock/positions", dependencies=[Depends(verify_api_key)])
@@ -470,7 +486,7 @@ async def stock_positions():
         return {"success": True, "positions": positions, "count": len(positions)}
     except Exception as e:
         logger.error(f"/stock/positions error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=_safe_error_msg(e))
 
 
 @app.post("/stock/price", dependencies=[Depends(verify_api_key)])
@@ -495,7 +511,7 @@ async def stock_price_update(req: StockPriceUpdateRequest):
         }
     except Exception as e:
         logger.error(f"/stock/price error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=_safe_error_msg(e))
 
 
 @app.post("/stock/pnl", dependencies=[Depends(verify_api_key)])
@@ -512,7 +528,7 @@ async def stock_pnl(req: StockPnlRequest):
         return {"success": True, **result}
     except Exception as e:
         logger.error(f"/stock/pnl error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=_safe_error_msg(e))
 
 
 @app.post("/stock/close_all", dependencies=[Depends(verify_api_key)])
@@ -528,7 +544,7 @@ async def stock_close_all():
         return {"success": True, **result}
     except Exception as e:
         logger.error(f"/stock/close_all error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=_safe_error_msg(e))
 
 
 # ══════════════════════════════════════════════════════════════
@@ -549,7 +565,7 @@ async def futures_quote(req: FuturesQuoteRequest):
         return result
     except Exception as e:
         logger.error(f"/futures/quote error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=_safe_error_msg(e))
 
 
 @app.post("/futures/option/quote", dependencies=[Depends(verify_api_key)])
@@ -566,7 +582,7 @@ async def futures_option_quote(req: FuturesOptionQuoteRequest):
         return result
     except Exception as e:
         logger.error(f"/futures/option/quote error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=_safe_error_msg(e))
 
 
 @app.post("/futures/chain", dependencies=[Depends(verify_api_key)])
@@ -583,7 +599,7 @@ async def futures_chain(req: FuturesChainRequest):
         return result
     except Exception as e:
         logger.error(f"/futures/chain error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=_safe_error_msg(e))
 
 
 # ══════════════════════════════════════════════════════════════
@@ -636,7 +652,7 @@ async def futures_order(req: FuturesOrderRequest):
         return result
     except Exception as e:
         logger.error(f"/futures/order error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=_safe_error_msg(e))
 
 
 @app.post("/futures/condition/order", dependencies=[Depends(verify_api_key)])
@@ -662,7 +678,7 @@ async def futures_condition_order(req: FuturesConditionOrderRequest):
         return result
     except Exception as e:
         logger.error(f"/futures/condition/order error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=_safe_error_msg(e))
 
 
 @app.post("/futures/cancel", dependencies=[Depends(verify_api_key)])
@@ -679,7 +695,7 @@ async def futures_cancel(req: CancelOrderRequest):
         return result
     except Exception as e:
         logger.error(f"/futures/cancel error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=_safe_error_msg(e))
 
 
 @app.get("/futures/positions", dependencies=[Depends(verify_api_key)])
@@ -714,7 +730,7 @@ async def futures_positions():
         return result
     except Exception as e:
         logger.error(f"/futures/positions error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=_safe_error_msg(e))
 
 
 @app.get("/futures/margin", dependencies=[Depends(verify_api_key)])
@@ -735,7 +751,7 @@ async def futures_margin(account_id: str = ""):
         raise
     except Exception as e:
         logger.error(f"/futures/margin error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=_safe_error_msg(e))
 
 
 # ══════════════════════════════════════════════════════════════
@@ -775,10 +791,10 @@ async def condition_order(req: ConditionOrderRequest):
         }
     except Exception as e:
         logger.error(f"/condition/order error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=_safe_error_msg(e))
 
 
-@app.get("/condition/orders")
+@app.get("/condition/orders", dependencies=[Depends(verify_api_key)])
 async def condition_orders(status: Optional[str] = None):
     """
     查詢所有條件單
@@ -792,7 +808,7 @@ async def condition_orders(status: Optional[str] = None):
         return {"success": True, "conditions": orders}
     except Exception as e:
         logger.error(f"/condition/orders error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=_safe_error_msg(e))
 
 
 @app.delete("/condition/order/{cond_id}", dependencies=[Depends(verify_api_key)])
@@ -810,7 +826,7 @@ async def condition_delete(cond_id: str):
         return {"success": False, "message": f"條件單 {cond_id} 不存在"}
     except Exception as e:
         logger.error(f"/condition/order/{cond_id} delete error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=_safe_error_msg(e))
 
 
 @app.post("/condition/evaluate", dependencies=[Depends(verify_api_key)])
@@ -844,7 +860,7 @@ async def condition_evaluate(req: ConditionEvaluateRequest):
         }
     except Exception as e:
         logger.error(f"/condition/evaluate error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=_safe_error_msg(e))
 
 
 # ══════════════════════════════════════════════════════════════
@@ -918,7 +934,7 @@ async def scheduler_start():
         }
     except Exception as e:
         logger.error(f"/scheduler/start error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=_safe_error_msg(e))
 
 
 @app.post("/scheduler/stop", dependencies=[Depends(verify_api_key)])
@@ -938,10 +954,10 @@ async def scheduler_stop():
         }
     except Exception as e:
         logger.error(f"/scheduler/stop error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=_safe_error_msg(e))
 
 
-@app.get("/scheduler/status")
+@app.get("/scheduler/status", dependencies=[Depends(verify_api_key)])
 async def scheduler_status():
     """
     查詢排程狀態
@@ -957,10 +973,10 @@ async def scheduler_status():
         }
     except Exception as e:
         logger.error(f"/scheduler/status error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=_safe_error_msg(e))
 
 
-@app.get("/scheduler/auto_square_result")
+@app.get("/scheduler/auto_square_result", dependencies=[Depends(verify_api_key)])
 async def scheduler_auto_square_result():
     """
     查詢最近一次自動平倉結果
@@ -975,7 +991,7 @@ async def scheduler_auto_square_result():
         return {"success": True, "result": None, "message": "尚無記錄"}
     except Exception as e:
         logger.error(f"/scheduler/auto_square_result error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=_safe_error_msg(e))
 
 
 @app.post("/scheduler/trigger_now", dependencies=[Depends(verify_api_key)])
@@ -992,7 +1008,7 @@ async def scheduler_trigger_now():
         return {"success": True, "result": result}
     except Exception as e:
         logger.error(f"/scheduler/trigger_now error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=_safe_error_msg(e))
 
 
 class AutoSquareToggleRequest(BaseModel):
@@ -1018,10 +1034,10 @@ async def scheduler_auto_square_toggle(req: AutoSquareToggleRequest):
         }
     except Exception as e:
         logger.error(f"/scheduler/auto_square_toggle error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=_safe_error_msg(e))
 
 
-@app.get("/scheduler/limit_up_down_results")
+@app.get("/scheduler/limit_up_down_results", dependencies=[Depends(verify_api_key)])
 async def scheduler_limit_up_down_results():
     """
     查詢最近漲跌停平倉記錄
@@ -1036,7 +1052,7 @@ async def scheduler_limit_up_down_results():
         return {"success": True, "results": []}
     except Exception as e:
         logger.error(f"/scheduler/limit_up_down_results error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=_safe_error_msg(e))
 
 
 # ══════════════════════════════════════════════════════════════
@@ -1056,7 +1072,7 @@ class QuotesBroadcastRequest(BaseModel):
     symbol: Optional[str] = None
 
 
-@app.post("/quotes/subscribe")
+@app.post("/quotes/subscribe", dependencies=[Depends(verify_api_key)])
 async def quotes_subscribe(req: QuotesSubscribeRequest):
     """
     訂閱股票/期貨報價
@@ -1074,10 +1090,10 @@ async def quotes_subscribe(req: QuotesSubscribeRequest):
         }
     except Exception as e:
         logger.error(f"/quotes/subscribe error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=_safe_error_msg(e))
 
 
-@app.post("/quotes/unsubscribe")
+@app.post("/quotes/unsubscribe", dependencies=[Depends(verify_api_key)])
 async def quotes_unsubscribe(req: QuotesUnsubscribeRequest):
     """取消訂閱"""
     try:
@@ -1090,10 +1106,10 @@ async def quotes_unsubscribe(req: QuotesUnsubscribeRequest):
         }
     except Exception as e:
         logger.error(f"/quotes/unsubscribe error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=_safe_error_msg(e))
 
 
-@app.get("/quotes/subscriptions")
+@app.get("/quotes/subscriptions", dependencies=[Depends(verify_api_key)])
 async def quotes_subscriptions():
     """查詢目前所有訂閱"""
     try:
@@ -1101,7 +1117,7 @@ async def quotes_subscriptions():
         return {"success": True, "subscriptions": qbs.get_subscriptions()}
     except Exception as e:
         logger.error(f"/quotes/subscriptions error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=_safe_error_msg(e))
 
 
 @app.post("/quotes/broadcast", dependencies=[Depends(verify_api_key)])
@@ -1123,7 +1139,7 @@ async def quotes_broadcast_now(req: QuotesBroadcastRequest):
         return {"success": False, "message": f"{sym} 未訂閱"}
     except Exception as e:
         logger.error(f"/quotes/broadcast error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=_safe_error_msg(e))
 
 
 @app.on_event("startup")
@@ -1146,23 +1162,57 @@ async def websocket_endpoint(websocket: WebSocket):
     """
     WebSocket 端點 — 接收 Android App 連線
 
+    認證流程：
+      1. Client 連線後，必須在第一筆訊息傳送 API Key 驗證
+         {"event": "auth", "api_key": "你的API_KEY"}
+      2. 驗證失敗 → server 關閉連線（1008 Policy）
+      3. 驗證成功 → 回 {"event": "auth_ok"}，之後可正常訂閱
+
     支援訊息格式：
-      1. {"event": "ping"} → 回 pong
-      2. {"event": "subscribe", "symbols": ["2330", "TXF"], "topics": ["order_update"]}
+      1. {"event": "auth", "api_key": "..."}     → 身份驗證（連線後第一步）
+      2. {"event": "ping"}                      → 回 pong
+      3. {"event": "subscribe", "symbols": [...], "topics": [...]}
          → 訂閱股票報價 + 事件通知
-      3. {"event": "unsubscribe", "symbols": ["2330"]}
+      4. {"event": "unsubscribe", "symbols": [...]}
          → 取消訂閱股票
 
     推送格式（Server → Client）：
       {"event": "quote", "data": {...}, "timestamp": "..."}
       {"event": "order_update", "data": {...}, "timestamp": "..."}
     """
-    manager = get_ws_manager()
-
-    # 自動產生 client_id
     import uuid
     client_id = str(uuid.uuid4())[:12]
 
+    # ── 步驟 1：等待第一筆訊息驗證 API Key ──────────────────────
+    try:
+        first_data = await websocket.receive_text()
+        try:
+            first_msg = json.loads(first_data)
+        except json.JSONDecodeError:
+            await websocket.close(code=1008, reason="Invalid JSON")
+            return
+
+        if first_msg.get("event") != "auth":
+            await websocket.close(code=1008, reason="Must authenticate with 'auth' event first")
+            return
+
+        api_key = first_msg.get("api_key", "")
+        # 立即驗證（不在依賴框架的情況下手動呼叫）
+        if not _ALLOWED_API_KEYS and not _BACKUP_API_KEY:
+            _load_api_keys()
+        valid = (api_key in _ALLOWED_API_KEYS or api_key == _BACKUP_API_KEY
+                 or (not _ALLOWED_API_KEYS and not _BACKUP_API_KEY))  # dev-mode
+        if not valid:
+            await websocket.close(code=1008, reason="Invalid API Key")
+            return
+
+        # 驗證成功，告知 client
+        await websocket.send_json({"event": "auth_ok", "client_id": client_id})
+    except WebSocketDisconnect:
+        return  # Client 立即斷線，忽略
+
+    # ── 步驟 2：正常訊息處理迴圈 ──────────────────────────────
+    manager = get_ws_manager()
     await manager.connect(client_id, websocket)
 
     try:
@@ -1258,7 +1308,7 @@ class ManualNotificationRequest(BaseModel):
     data: Optional[Dict[str, Any]] = None
 
 
-@app.post("/notification/register")
+@app.post("/notification/register", dependencies=[Depends(verify_api_key)])
 async def register_notification_token(req: TokenRegisterRequest):
     """
     註冊 client push token（for Firebase/LINE/Telegram）
@@ -1286,7 +1336,7 @@ async def register_notification_token(req: TokenRegisterRequest):
         }
     except Exception as e:
         logger.error(f"/notification/register error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=_safe_error_msg(e))
 
 
 @app.post("/notification/send", dependencies=[Depends(verify_api_key)])
@@ -1315,10 +1365,10 @@ async def send_notification(req: ManualNotificationRequest):
         }
     except Exception as e:
         logger.error(f"/notification/send error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=_safe_error_msg(e))
 
 
-@app.get("/notification/clients")
+@app.get("/notification/clients", dependencies=[Depends(verify_api_key)])
 async def get_notification_clients():
     """
     取得已連線的 WebSocket clients 概覽
