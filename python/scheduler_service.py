@@ -3,7 +3,7 @@
 #
 # 排程時間表：
 #   08:30 — 條件單引擎 evaluate_all()（开盘前预扫条件单）
-#   13:20 — 股票當日沖自動平倉（DayTradeService.auto_squaring_check）
+#   13:20 — 股票當日沖自動平倉（DayTradeService.auto_close_all）
 #   13:30 — 期貨自動平倉
 #   每分鐘 — 漲跌停監控（LimitUpDownService.check_limit_up_down）
 
@@ -181,7 +181,7 @@ class SchedulerService:
         logger.info("[Scheduler] 執行股票當日沖自動平倉 (13:20)")
         try:
             if self._daytrade_service is not None:
-                result = self._daytrade_service.auto_squaring_check()
+                result = self._daytrade_service.auto_close_all(reason="scheduled_auto_square")
                 self._last_auto_square_result = self._convert_to_auto_square_result(result)
                 logger.info(
                     f"[Scheduler] 股票自動平倉完成: "
@@ -280,22 +280,27 @@ class SchedulerService:
     # ──────────────────────────────────────────────
 
     def _convert_to_auto_square_result(self, raw_result: Dict[str, Any]) -> AutoSquareResult:
-        """將 DayTradeService.auto_squaring_check() 的回傳轉為 AutoSquareResult"""
-        orders = raw_result.get("orders_placed", [])
-        failed = raw_result.get("failed", [])
+        """將 DayTradeService.auto_close_all() 的回傳轉為 AutoSquareResult
 
-        # 簡單計算 total_profit（需根據實際成交回報更新）
+        auto_close_all() returns:
+            {"closed": N, "failed": N, "details": [...], "summary": "..."}
+        """
+        details = raw_result.get("details", [])
+        failed_list = [d for d in details if not d.get("success", False)]
+        success_list = [d for d in details if d.get("success", False)]
+
         total_profit = 0.0
-        for o in orders:
-            total_profit += o.get("profit", 0.0)
+        for d in success_list:
+            pnl = d.get("realized_pnl") or d.get("pnl", 0.0)
+            total_profit += pnl
 
         return AutoSquareResult(
-            success_count=len(orders),
-            failed_count=len(failed),
+            success_count=raw_result.get("closed", 0),
+            failed_count=raw_result.get("failed", 0),
             total_profit=total_profit,
-            orders=orders,
-            failed=failed,
-            executed_at=raw_result.get("time", datetime.now().isoformat()),
+            orders=success_list,
+            failed=failed_list,
+            executed_at=datetime.now().isoformat(),
         )
 
     # ──────────────────────────────────────────────
@@ -386,7 +391,7 @@ class SchedulerService:
         # 股票
         if self._daytrade_service:
             try:
-                r = self._daytrade_service.auto_squaring_check()
+                r = self._daytrade_service.auto_close_all(reason="scheduled_auto_square")
                 self._last_auto_square_result = self._convert_to_auto_square_result(r)
                 results.append({"type": "stock", "result": r})
             except Exception as e:

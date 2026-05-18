@@ -13,7 +13,7 @@ from typing import Optional, List, Dict, Any
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, Header, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 # 富邦 SDK
 try:
@@ -185,27 +185,27 @@ class StockEntryRequest(BaseModel):
 
 class StockExitRequest(BaseModel):
     symbol: str
-    account_id: str = ""   # 帳號驗證（防止他人平倉）
+    account_id: str   # 必填：帳號驗證（防止他人平倉），空字串視為無效請求
     reason: str = "manual"  # "stop_loss" | "breakout_exit" | "breakdown_exit" | "manual"
 
+class StockEntryRequest(BaseModel):
+    symbol: str = Field(..., pattern=r"^\d{4}$")   # 股票：4 位數字
+    entry_mode: str = "breakdown_buy"   # "breakdown_buy" | "breakout_sell"
+    price: float
+    quantity: int
+    stop_loss_pct: float = 2.0
+    track_levels: int = 1
+    product_type: str = "stock"
+    account_id: str = ""
+    tick_size: float = 0.1
 
-class StockPriceUpdateRequest(BaseModel):
-    symbol: str
-    current_price: float
-
-
-class StockPnlRequest(BaseModel):
-    prices: Dict[str, float]  # symbol → current_price
-
-
-# ========== 期貨下單 Request/Response Models ==========
 
 class FuturesOrderRequest(BaseModel):
     # 支援 account (舊) 和 account_id (新) 兩種命名
     account: Optional[str] = None
     account_id: Optional[str] = None
     futures_code: Optional[str] = None  # 舊命名（向後相容）
-    symbol: Optional[str] = None        # 新命名（通用代碼）
+    symbol: Optional[str] = Field(None, pattern=r"^[A-Z]{2,4}\d{4,6}$")  # 新命名（通用代碼）
     price: Optional[float] = None       # 委託價格（None = 市價）
     quantity: int = 1
     bs: Optional[str] = None           # 舊版期貨下單（"buy" | "sell"）
@@ -412,7 +412,7 @@ async def stock_exit(req: StockExitRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/stock/position/{symbol}")
+@app.get("/stock/position/{symbol}", dependencies=[Depends(verify_api_key)])
 async def stock_position(symbol: str):
     """
     查詢特定商品持倉狀態
@@ -432,7 +432,7 @@ async def stock_position(symbol: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/stock/positions")
+@app.get("/stock/positions", dependencies=[Depends(verify_api_key)])
 async def stock_positions():
     """
     查詢所有未平倉持倉（當日沖內部持倉 + 券商真實庫存）
@@ -470,7 +470,7 @@ async def stock_positions():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/stock/price")
+@app.post("/stock/price", dependencies=[Depends(verify_api_key)])
 async def stock_price_update(req: StockPriceUpdateRequest):
     """
     饋入即時報價（更新持倉的 highest/lowest_since_entry）
@@ -495,7 +495,7 @@ async def stock_price_update(req: StockPriceUpdateRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/stock/pnl")
+@app.post("/stock/pnl", dependencies=[Depends(verify_api_key)])
 async def stock_pnl(req: StockPnlRequest):
     """
     計算所有持倉的未實現 + 已實現損益
@@ -532,7 +532,7 @@ async def stock_close_all():
 # 期貨報價端點
 # ══════════════════════════════════════════════════════════════
 
-@app.post("/futures/quote")
+@app.post("/futures/quote", dependencies=[Depends(verify_api_key)])
 async def futures_quote(req: FuturesQuoteRequest):
     """
     期貨報價查詢
@@ -549,7 +549,7 @@ async def futures_quote(req: FuturesQuoteRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/futures/option/quote")
+@app.post("/futures/option/quote", dependencies=[Depends(verify_api_key)])
 async def futures_option_quote(req: FuturesOptionQuoteRequest):
     """
     選擇權報價查詢
@@ -566,7 +566,7 @@ async def futures_option_quote(req: FuturesOptionQuoteRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/futures/chain")
+@app.post("/futures/chain", dependencies=[Depends(verify_api_key)])
 async def futures_chain(req: FuturesChainRequest):
     """
     履約價鍊查詢
@@ -679,7 +679,7 @@ async def futures_cancel(req: CancelOrderRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/futures/positions")
+@app.get("/futures/positions", dependencies=[Depends(verify_api_key)])
 async def futures_positions():
     """
     取得期貨持倉
@@ -714,7 +714,7 @@ async def futures_positions():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/futures/margin")
+@app.get("/futures/margin", dependencies=[Depends(verify_api_key)])
 async def futures_margin(account_id: str = ""):
     """
     取得期貨帳戶保證金餘額

@@ -114,6 +114,15 @@ class DayTradeService:
         mode = EntryMode(entry_mode)
         prod = ProductType(product_type)
 
+        # ── Symbol 格式驗證（S3 / M3）──────────────────────────────────
+        import re
+        if prod == ProductType.STOCK:
+            if not re.match(r"^\d{4}$", symbol):
+                return {"success": False, "message": f"股票代碼格式錯誤：{symbol}（需為 4 位數字）"}
+        else:
+            if not re.match(r"^[A-Z]{2,4}\d{4,6}$", symbol):
+                return {"success": False, "message": f"期貨代碼格式錯誤：{symbol}（如 TXF202506）"}
+
         with self._lock:
             # 若已有相同 symbol 的未平倉，先警告
             if symbol in self._positions:
@@ -165,12 +174,29 @@ class DayTradeService:
             symbol:        商品代碼
             current_price: 即時價格
         """
+        # ── 基本價格合理性驗證（M1）─────────────────────────────────────
+        if current_price <= 0:
+            logger.warning(f"[update_price] 忽略無效價格：{symbol} price={current_price}")
+            return
+
         with self._lock:
             if symbol not in self._positions:
                 return
             pos = self._positions[symbol]
             if pos.status != "open":
                 return
+
+            # 價格合理性：若相對於進倉價偏離 > 50%，視為異常（閃崩或錯誤報價）
+            if pos.entry_price > 0:
+                change_pct = abs(current_price - pos.entry_price) / pos.entry_price
+                if change_pct > 0.5:
+                    logger.warning(
+                        f"[update_price] 價格異常波動：{symbol} "
+                        f"建倉={pos.entry_price} 現價={current_price} "
+                        f"偏離={change_pct*100:.1f}%，已忽略"
+                    )
+                    return
+
             pos.update_price(current_price)
 
     # ══════════════════════════════════════════════════════════════
@@ -240,8 +266,8 @@ class DayTradeService:
             if pos.status == "closed":
                 return {"success": False, "message": f"{symbol} 已平倉"}
 
-            # 驗證帳號（若提供了 account_id）
-            if account_id and pos.account_id and account_id != pos.account_id:
+            # 驗證帳號（S4 強化：現在 StockExitRequest.account_id 必填）
+            if pos.account_id and account_id != pos.account_id:
                 return {"success": False, "message": "帳號不符，拒絕平倉"}
 
         # 決定平倉方向（與進場反向）
@@ -336,10 +362,32 @@ class DayTradeService:
         }
 
     def _force_close_position(self, symbol: str, reason: str) -> Dict[str, Any]:
-        """內部：強制平倉（不做 API 呼叫，用於重新進場）"""
+        """內部：強制平倉（不做 API 呼叫，用於重新進場）
+
+        記錄平倉歷史（M2），與 close_position() 保持一致
+        """
         pos = self._positions.get(symbol)
         if not pos:
             return {"success": False, "message": f"找不到 {symbol}"}
+        if pos.status == "closed":
+            return {"success": True, "message": f"{symbol} 已是平倉狀態"}
+
+        # 記錄到平倉歷史（M2）
+        record = {
+            "symbol": pos.symbol,
+            "entry_mode": pos.entry_mode.value,
+            "entry_price": pos.entry_price,
+            "entry_time": pos.entry_time.isoformat() if pos.entry_time else None,
+            "close_price": pos.highest_since_entry if pos.entry_mode == EntryMode.BREAKDOWN_BUY else pos.lowest_since_entry,
+            "quantity": pos.quantity,
+            "entry_time": pos.entry_time.isoformat() if pos.entry_time else None,
+            "close_time": datetime.now().isoformat(),
+            "realized_pnl": 0.0,  # 強制平倉不計算損益（無實際成交）
+            "close_reason": reason,
+            "order_no": None,
+        }
+        self._closed_positions.append(record)
+
         pos.status = "closed"
         pos.closed_at = datetime.now()
         return {"success": True, "message": f"強制平倉 {symbol}"}
