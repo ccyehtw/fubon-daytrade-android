@@ -86,7 +86,7 @@ def get_futures_quote(code: str) -> Dict[str, Any]:
     try:
         # 富邦期貨報價接口
         # 嘗試使用 _sdk.futures.realtime_quote(code)
-        resp = _sdk.futures.get_quote(code)
+        resp = _sdk.futopt.get_quote(code)
 
         if not resp.is_success:
             return {"success": False, "message": resp.message}
@@ -164,7 +164,7 @@ def get_futures_option_quote(code: str) -> Dict[str, Any]:
         return {"success": False, "message": "SDK not initialized"}
 
     try:
-        resp = _sdk.futures.get_option_quote(code)
+        resp = _sdk.futopt.get_option_quote(code)
         if not resp.is_success:
             return {"success": False, "message": resp.message}
 
@@ -231,7 +231,7 @@ def get_futures_chain(symbol: str) -> Dict[str, Any]:
         return {"success": False, "message": "SDK not initialized"}
 
     try:
-        resp = _sdk.futures.get_chain(symbol)
+        resp = _sdk.futopt.get_chain(symbol)
         if not resp.is_success:
             return {"success": False, "message": resp.message}
 

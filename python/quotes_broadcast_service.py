@@ -221,7 +221,7 @@ class QuotesBroadcastService:
 
         try:
             # 嘗試使用 SDK 的期貨報價
-            resp = self._sdk.futures.get_quote(symbol)
+            resp = self._sdk.futopt.get_quote(symbol)
             if not resp.is_success:
                 return self._mock_futures_quote(symbol)
 

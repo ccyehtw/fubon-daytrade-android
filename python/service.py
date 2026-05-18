@@ -207,6 +207,15 @@ class StockExitRequest(BaseModel):
     account_id: str   # 必填：帳號驗證（防止他人平倉），空字串視為無效請求
     reason: str = "manual"  # "stop_loss" | "breakout_exit" | "breakdown_exit" | "manual"
 
+class StockPriceUpdateRequest(BaseModel):
+    """饋入即時報價（更新持倉的 highest/lowest_since_entry）"""
+    symbol: str
+    current_price: float
+
+class StockPnlRequest(BaseModel):
+    """計算持倉損益"""
+    account_id: str   # 必填：帳號驗證（防止他人查閱）
+
 class StockEntryRequest(BaseModel):
     symbol: str = Field(..., pattern=r"^\d{4}$")   # 股票：4 位數字
     entry_mode: str = "breakdown_buy"   # "breakdown_buy" | "breakout_sell"
@@ -224,7 +233,7 @@ class FuturesOrderRequest(BaseModel):
     account: Optional[str] = None
     account_id: Optional[str] = None
     futures_code: Optional[str] = None  # 舊命名（向後相容）
-    symbol: Optional[str] = Field(None, pattern=r"^[A-Z]{2,4}\d{4,6}$")  # 新命名（通用代碼）
+    symbol: Optional[str] = Field(None, pattern=r"^[A-Z]{2,10}[A-Z0-9]*$")  # 新命名（通用代碼，彈性接受各種格式）
     price: Optional[float] = None       # 委託價格（None = 市價）
     quantity: int = 1
     bs: Optional[str] = None           # 舊版期貨下單（"buy" | "sell"）

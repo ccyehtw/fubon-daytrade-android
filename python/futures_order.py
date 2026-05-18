@@ -13,9 +13,10 @@ logger = logging.getLogger(__name__)
 # 富邦 SDK 可用標記
 FUTURES_SDK_AVAILABLE = False
 try:
-    from fubon_neo.sdk import FubonSDK, Order
+    from fubon_neo.sdk import FubonSDK, Order, FutOptOrder
     from fubon_neo.constant import (
-        TimeInForce, OrderType, PriceType, MarketType, BSAction
+        TimeInForce, OrderType, PriceType, MarketType, BSAction,
+        FutOptMarketType, FutOptPriceType, FutOptOrderType
     )
     FUTURES_SDK_AVAILABLE = True
 except ImportError:
@@ -96,7 +97,7 @@ def place_futures_order(
     期貨市價/限價單
 
     Args:
-        account:      期貨帳號（例: "1247180/futopt/15901"）
+        account:      期貨帳號字串（例: "1247180/futopt/15901"）或 Account 物件
         futures_code: 期貨商品代碼（例: "TXF202506"）
         price:        委託價格（None = 市價）
         quantity:     委託口數
@@ -111,8 +112,50 @@ def place_futures_order(
     if not FUTURES_SDK_AVAILABLE:
         return {"success": False, "message": "Fubon SDK not available"}
 
+    # 解析 account 字串（格式："帳號/futopt/分公司"）
+    # 轉換為 Account 物件（使用登入時快取的 _futopt_account）
+    account_obj = _futopt_account
+    if account and _futopt_account:
+        # 從 account 字串解析出帳號，與快取的 _futopt_account 交叉驗證
+        parts = account.split("/")
+        if len(parts) >= 1:
+            acc_no = parts[0]
+            cached_no = getattr(_futopt_account, 'account', '')
+            if cached_no and acc_no != cached_no:
+                logger.warning(f"Account mismatch: passed={acc_no}, cached={cached_no}")
+            account_obj = _futopt_account
+
+    if account_obj is None:
+        return {"success": False, "message": "Not logged in (no futopt account)"}
+
+    # 自動判斷平倉 vs 新單
+    # 查詢目前持有部位，若已有相同商品的反向倉位，自動設為平倉單
+    order_type = FutOptOrderType.New
+    base_symbol = futures_code[:3] if len(futures_code) >= 3 else futures_code  # 取前3碼為基準（如 "TXO"）
+    try:
+        pos_resp = _sdk.futopt_accounting.query_hybrid_position(_futopt_account)
+        if pos_resp.is_success:
+            for pos_item in pos_resp.data:
+                pos_symbol = getattr(pos_item, 'symbol', '')
+                pos_bs = getattr(pos_item, 'buy_sell', None)
+                pos_lots = int(getattr(pos_item, 'orig_lots', 0) or 0)
+                pos_base = pos_symbol[:3] if len(pos_symbol) >= 3 else pos_symbol
+                # 比對基準代碼（前3碼），例如 "TXO20200R6" vs "TXO" → 匹配
+                if pos_base == base_symbol and pos_lots > 0 and pos_bs is not None:
+                    # 若部位為買(pos_bs=Buy)且欲下賣單，或部位為賣(pos_bs=Sell)且欲下買單 → 平倉
+                    pos_bs_str = str(pos_bs).split('.')[-1].upper()
+                    expected_close_bs = 'SELL' if pos_bs_str == 'BUY' else 'BUY'
+                    if bs.upper() == expected_close_bs:
+                        order_type = FutOptOrderType.Close
+                        logger.info(f"自動判斷為平倉單: {futures_code} x{quantity} {bs.upper()}（原有{pos_bs_str} x{pos_lots}）")
+                        break
+    except Exception as e:
+        logger.warning(f"自動判斷平倉失敗，使用新單: {e}")
+
     try:
         # 轉換買賣別
+        if not bs:
+            return {"success": False, "message": "bs (buy_sell) is required", "mock": False}
         bs_action = BSAction.Buy if bs.lower() == "buy" else BSAction.Sell
 
         # 決定價格類型
@@ -123,37 +166,48 @@ def place_futures_order(
             price_type = PriceType.Limit
             order_price = price
 
-        # 建立期貨委託單
-        order = Order(
+        # 建立期貨/選擇權委託單（使用 FutOptOrder）
+        if price is None or price_type == PriceType.Market:
+            # 市價單
+            opt_price_type = FutOptPriceType.Market
+            order_price_val = None
+        else:
+            # 限價單
+            opt_price_type = FutOptPriceType.Limit
+            order_price_val = str(price)
+
+        order = FutOptOrder(
             buy_sell=bs_action,
             symbol=futures_code,
-            price=str(order_price) if order_price else None,
-            quantity=quantity,
-            market_type=MarketType.Futures,
-            price_type=price_type,
+            price=order_price_val,
+            lot=quantity,
+            market_type=FutOptMarketType.Option,  # 選擇權（TXO 系列）
+            price_type=opt_price_type,
             time_in_force=TimeInForce.ROD,
-            order_type=OrderType.Futures,
+            order_type=order_type,  # 自動判斷（New 或 Close）
             user_def="futures_order"
         )
 
         logger.info(
-            f"期貨下單: {bs_action.name} {futures_code} x {quantity} @ "
-            f"{price if price else '市價'} ({price_type.name})"
+            f"期貨下單: {str(bs_action)} {futures_code} x {quantity} @ "
+            f"{price if price else '市價'} ({opt_price_type})"
         )
 
-        resp = _sdk.futures.place_order(account, order)
+        resp = _sdk.futopt.place_order(account_obj, order)
 
         if not resp.is_success:
             logger.error(f"期貨下單失敗: {resp.message}")
             return {"success": False, "message": resp.message}
 
-        order_data = resp.data[0] if resp.data else {}
+        # futopt.place_order 的 resp.data 是 FutOptOrderResult 物件（非 list）
+        order_data = resp.data if resp.data else None
         return {
             "success": True,
-            "order_no": getattr(order_data, "order_no", None),
-            "seq_no": getattr(order_data, "seq_no", None),
-            "status": getattr(order_data, "status", None),
+            "order_no": getattr(order_data, "order_no", None) if order_data else None,
+            "seq_no": getattr(order_data, "seq_no", None) if order_data else None,
+            "status": getattr(order_data, "status", None) if order_data else None,
             "message": "下單成功",
+            "order_type": str(order_type).split('.')[-1],  # New 或 Close
         }
     except NotImplementedError as e:
         logger.error(f"期貨下單不支援: {e}")

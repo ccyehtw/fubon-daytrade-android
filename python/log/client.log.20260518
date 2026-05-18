@@ -36,3 +36,218 @@
 [2026-05-18 02:59:26.051997338 +08:00 INFO] [query_hybrid_position]: 184.057756ms
 [2026-05-18 03:06:12.534226464 +08:00 INFO] [get inventories] account=Account { branch_no: "20125", account: "191392", account_type: "stock", name: "葉重慶" }
 [2026-05-18 03:06:12.720487951 +08:00 INFO] [inventory_result]: 186.221097ms
+[2026-05-18 11:42:18.073628728 +08:00 INFO] [apikey_login] personal_id="N123127908"
+[2026-05-18 11:42:25.692064154 +08:00 INFO] [apikey_login] personal_id="N123127908"
+[2026-05-18 11:42:40.946324426 +08:00 INFO] [apikey_login] personal_id="N123127908"
+[2026-05-18 11:42:41.142949973 +08:00 INFO] API Key account requires certificate validation
+[2026-05-18 11:42:41.327345981 +08:00 INFO] [apikey_login] Loaded permissions from XPSAZBIZS: {MarketData, StockAccounting, StockTrading, FutoptAccounting, FutoptTrading}
+[2026-05-18 11:42:41.868906502 +08:00 INFO] [future_option_mapping]: 541.102121ms
+[2026-05-18 11:42:42.052323040 +08:00 INFO] [future_option_mapping]: 181.139147ms
+[2026-05-18 11:42:42.441410475 +08:00 INFO] [future_option_mapping]: 388.730155ms
+[2026-05-18 11:42:42.637490993 +08:00 INFO] [future_option_mapping]: 181.608647ms
+[2026-05-18 11:43:04.549829859 +08:00 INFO] [query_hybrid_position]: 185.581647ms
+[2026-05-18 11:43:24.020182105 +08:00 INFO] [get equity]: 218.519569ms
+[2026-05-18 12:15:54.705298251 +08:00 INFO] [apikey_login] personal_id="N123127908"
+[2026-05-18 12:15:54.896718558 +08:00 INFO] API Key account requires certificate validation
+[2026-05-18 12:15:55.080308885 +08:00 INFO] [apikey_login] Loaded permissions from XPSAZBIZS: {StockTrading, FutoptAccounting, MarketData, FutoptTrading, StockAccounting}
+[2026-05-18 12:15:55.620225475 +08:00 INFO] [future_option_mapping]: 539.83641ms
+[2026-05-18 12:15:55.804069802 +08:00 INFO] [future_option_mapping]: 180.941167ms
+[2026-05-18 12:15:56.198093356 +08:00 INFO] [future_option_mapping]: 393.588304ms
+[2026-05-18 12:15:56.393437364 +08:00 INFO] [future_option_mapping]: 183.073307ms
+[2026-05-18 12:21:55.250210327 +08:00 INFO] [apikey_login] personal_id="N123127908"
+[2026-05-18 12:21:55.432522153 +08:00 INFO] API Key account requires certificate validation
+[2026-05-18 12:21:55.616916100 +08:00 INFO] [apikey_login] Loaded permissions from XPSAZBIZS: {StockTrading, MarketData, FutoptAccounting, FutoptTrading, StockAccounting}
+[2026-05-18 12:21:56.156622500 +08:00 INFO] [future_option_mapping]: 539.57225ms
+[2026-05-18 12:21:56.339446887 +08:00 INFO] [future_option_mapping]: 180.719677ms
+[2026-05-18 12:21:56.730456481 +08:00 INFO] [future_option_mapping]: 390.594164ms
+[2026-05-18 12:21:56.932295368 +08:00 INFO] [future_option_mapping]: 181.175626ms
+[2026-05-18 12:23:15.066463161 +08:00 INFO] [query_hybrid_position]: 183.186667ms
+[2026-05-18 12:25:05.641244888 +08:00 INFO] [apikey_login] personal_id="N123127908"
+[2026-05-18 12:25:05.823411265 +08:00 INFO] API Key account requires certificate validation
+[2026-05-18 12:25:06.007101141 +08:00 INFO] [apikey_login] Loaded permissions from XPSAZBIZS: {FutoptTrading, StockAccounting, MarketData, StockTrading, FutoptAccounting}
+[2026-05-18 12:25:06.545787851 +08:00 INFO] [future_option_mapping]: 538.56862ms
+[2026-05-18 12:25:06.728629137 +08:00 INFO] [future_option_mapping]: 180.153266ms
+[2026-05-18 12:25:07.118899922 +08:00 INFO] [future_option_mapping]: 389.969544ms
+[2026-05-18 12:25:07.315935480 +08:00 INFO] [future_option_mapping]: 182.584068ms
+[2026-05-18 12:26:09.042156594 +08:00 INFO] [apikey_login] personal_id="N123127908"
+[2026-05-18 12:26:09.222415020 +08:00 INFO] API Key account requires certificate validation
+[2026-05-18 12:26:09.404360847 +08:00 INFO] [apikey_login] Loaded permissions from XPSAZBIZS: {FutoptTrading, StockTrading, StockAccounting, MarketData, FutoptAccounting}
+[2026-05-18 12:26:09.940358184 +08:00 INFO] [future_option_mapping]: 535.882627ms
+[2026-05-18 12:26:10.122102351 +08:00 INFO] [future_option_mapping]: 179.435987ms
+[2026-05-18 12:26:10.510029322 +08:00 INFO] [future_option_mapping]: 387.627781ms
+[2026-05-18 12:26:10.704846688 +08:00 INFO] [future_option_mapping]: 180.634135ms
+[2026-05-18 12:28:21.221261292 +08:00 INFO] [apikey_login] personal_id="N123127908"
+[2026-05-18 12:28:21.403132329 +08:00 INFO] API Key account requires certificate validation
+[2026-05-18 12:28:21.586323016 +08:00 INFO] [apikey_login] Loaded permissions from XPSAZBIZS: {StockAccounting, FutoptAccounting, StockTrading, FutoptTrading, MarketData}
+[2026-05-18 12:28:22.124348216 +08:00 INFO] [future_option_mapping]: 537.92086ms
+[2026-05-18 12:28:22.306846873 +08:00 INFO] [future_option_mapping]: 180.397427ms
+[2026-05-18 12:28:22.694517286 +08:00 INFO] [future_option_mapping]: 387.402944ms
+[2026-05-18 12:28:22.887172374 +08:00 INFO] [future_option_mapping]: 182.335657ms
+[2026-05-18 12:30:12.304446893 +08:00 INFO] [apikey_login] personal_id="N123127908"
+[2026-05-18 12:30:12.485111069 +08:00 INFO] API Key account requires certificate validation
+[2026-05-18 12:30:12.666803646 +08:00 INFO] [apikey_login] Loaded permissions from XPSAZBIZS: {MarketData, FutoptAccounting, StockAccounting, StockTrading, FutoptTrading}
+[2026-05-18 12:30:13.201590975 +08:00 INFO] [future_option_mapping]: 534.68051ms
+[2026-05-18 12:30:13.382621742 +08:00 INFO] [future_option_mapping]: 179.015557ms
+[2026-05-18 12:30:13.768525827 +08:00 INFO] [future_option_mapping]: 385.598775ms
+[2026-05-18 12:30:13.961246174 +08:00 INFO] [future_option_mapping]: 179.808937ms
+[2026-05-18 12:37:14.697358807 +08:00 INFO] [apikey_login] personal_id="N123127908"
+[2026-05-18 12:37:14.878672623 +08:00 INFO] API Key account requires certificate validation
+[2026-05-18 12:37:15.061419590 +08:00 INFO] [apikey_login] Loaded permissions from XPSAZBIZS: {FutoptAccounting, StockTrading, MarketData, FutoptTrading, StockAccounting}
+[2026-05-18 12:37:15.599708800 +08:00 INFO] [future_option_mapping]: 538.16924ms
+[2026-05-18 12:37:15.782668107 +08:00 INFO] [future_option_mapping]: 179.552697ms
+[2026-05-18 12:37:16.170899231 +08:00 INFO] [future_option_mapping]: 387.965565ms
+[2026-05-18 12:37:16.362345358 +08:00 INFO] [future_option_mapping]: 180.990226ms
+[2026-05-18 12:37:24.117131013 +08:00 INFO] [get equity]: 221.305119ms
+[2026-05-18 12:37:26.969953437 +08:00 INFO] [query_hybrid_position]: 184.630026ms
+[2026-05-18 12:37:30.379568773 +08:00 INFO] [query_hybrid_position]: 183.585927ms
+[2026-05-18 12:41:53.685632928 +08:00 INFO] [apikey_login] personal_id="N123127908"
+[2026-05-18 12:41:53.868283765 +08:00 INFO] API Key account requires certificate validation
+[2026-05-18 12:41:54.051347312 +08:00 INFO] [apikey_login] Loaded permissions from XPSAZBIZS: {MarketData, StockTrading, StockAccounting, FutoptAccounting, FutoptTrading}
+[2026-05-18 12:41:54.591541242 +08:00 INFO] [future_option_mapping]: 540.10778ms
+[2026-05-18 12:41:54.773683338 +08:00 INFO] [future_option_mapping]: 180.022456ms
+[2026-05-18 12:41:55.160626713 +08:00 INFO] [future_option_mapping]: 386.615414ms
+[2026-05-18 12:41:55.351676820 +08:00 INFO] [future_option_mapping]: 182.040967ms
+[2026-05-18 12:43:17.776742959 +08:00 INFO] [apikey_login] personal_id="N123127908"
+[2026-05-18 12:43:17.960373095 +08:00 INFO] API Key account requires certificate validation
+[2026-05-18 12:43:18.143274092 +08:00 INFO] [apikey_login] Loaded permissions from XPSAZBIZS: {FutoptTrading, MarketData, StockAccounting, FutoptAccounting, StockTrading}
+[2026-05-18 12:43:18.680668202 +08:00 INFO] [future_option_mapping]: 537.29285ms
+[2026-05-18 12:43:18.862790708 +08:00 INFO] [future_option_mapping]: 180.127786ms
+[2026-05-18 12:43:19.249908673 +08:00 INFO] [future_option_mapping]: 386.826885ms
+[2026-05-18 12:43:19.439908699 +08:00 INFO] [future_option_mapping]: 180.492406ms
+[2026-05-18 12:46:34.571941286 +08:00 INFO] [apikey_login] personal_id="N123127908"
+[2026-05-18 12:46:34.752446959 +08:00 INFO] API Key account requires certificate validation
+[2026-05-18 12:46:34.934667190 +08:00 INFO] [apikey_login] Loaded permissions from XPSAZBIZS: {FutoptAccounting, MarketData, FutoptTrading, StockAccounting, StockTrading}
+[2026-05-18 12:46:35.470761576 +08:00 INFO] [future_option_mapping]: 535.997056ms
+[2026-05-18 12:46:35.652086018 +08:00 INFO] [future_option_mapping]: 179.328185ms
+[2026-05-18 12:46:36.036098217 +08:00 INFO] [future_option_mapping]: 383.731489ms
+[2026-05-18 12:46:36.225475960 +08:00 INFO] [future_option_mapping]: 180.004945ms
+[2026-05-18 12:46:36.248883192 +08:00 INFO] [place_futopt_order] account=Account { branch_no: "15901", account: "1247180", account_type: "futopt", name: "葉重慶" },order=FutOptOrder { oxtp: NewOrder, market_type: Option, date: "20260518", buy_sell: Sell, symbol: "TXO2025", market: "TAIMEX", price_type: Market, price: None, lot: 1, time_in_force: ROD, order_type: New, symbol2: None, buy_sell2: None, user_def: "futures_order" }, is_async=false
+[2026-05-18 12:46:36.248921101 +08:00 WARN] [place_futopt_order] user_def contains invalid characters: '_'
+[2026-05-18 12:48:22.725001247 +08:00 INFO] [apikey_login] personal_id="N123127908"
+[2026-05-18 12:48:22.907737264 +08:00 INFO] API Key account requires certificate validation
+[2026-05-18 12:48:23.090483321 +08:00 INFO] [apikey_login] Loaded permissions from XPSAZBIZS: {FutoptTrading, StockTrading, FutoptAccounting, StockAccounting, MarketData}
+[2026-05-18 12:48:23.629828272 +08:00 INFO] [future_option_mapping]: 539.219261ms
+[2026-05-18 12:48:23.812284830 +08:00 INFO] [future_option_mapping]: 180.418219ms
+[2026-05-18 12:48:24.200102932 +08:00 INFO] [future_option_mapping]: 387.527233ms
+[2026-05-18 12:48:24.394787158 +08:00 INFO] [future_option_mapping]: 181.417979ms
+[2026-05-18 12:48:55.773437161 +08:00 INFO] [apikey_login] personal_id="N123127908"
+[2026-05-18 12:48:55.954771029 +08:00 INFO] API Key account requires certificate validation
+[2026-05-18 12:48:56.138082566 +08:00 INFO] [apikey_login] Loaded permissions from XPSAZBIZS: {FutoptAccounting, StockAccounting, StockTrading, MarketData, FutoptTrading}
+[2026-05-18 12:48:56.676176886 +08:00 INFO] [future_option_mapping]: 537.973211ms
+[2026-05-18 12:48:56.858643964 +08:00 INFO] [future_option_mapping]: 180.30626ms
+[2026-05-18 12:48:57.244617698 +08:00 INFO] [future_option_mapping]: 385.700556ms
+[2026-05-18 12:48:57.437670796 +08:00 INFO] [future_option_mapping]: 183.059317ms
+[2026-05-18 12:48:57.458591286 +08:00 INFO] [place_futopt_order] account=Account { branch_no: "15901", account: "1247180", account_type: "futopt", name: "葉重慶" },order=FutOptOrder { oxtp: NewOrder, market_type: Option, date: "20260518", buy_sell: Sell, symbol: "TXO20250620200P", market: "TAIMEX", price_type: Market, price: None, lot: 1, time_in_force: ROD, order_type: New, symbol2: None, buy_sell2: None, user_def: "futures_order" }, is_async=false
+[2026-05-18 12:48:57.458616476 +08:00 WARN] [place_futopt_order] user_def contains invalid characters: '_'
+[2026-05-18 12:50:08.400772025 +08:00 INFO] [apikey_login] personal_id="N123127908"
+[2026-05-18 12:50:08.582352792 +08:00 INFO] API Key account requires certificate validation
+[2026-05-18 12:50:08.765367928 +08:00 INFO] [apikey_login] Loaded permissions from XPSAZBIZS: {StockTrading, FutoptTrading, StockAccounting, MarketData, FutoptAccounting}
+[2026-05-18 12:50:09.303354876 +08:00 INFO] [future_option_mapping]: 537.862658ms
+[2026-05-18 12:50:09.485676433 +08:00 INFO] [future_option_mapping]: 180.153539ms
+[2026-05-18 12:50:09.871356869 +08:00 INFO] [future_option_mapping]: 385.299116ms
+[2026-05-18 12:50:10.063956837 +08:00 INFO] [future_option_mapping]: 182.444376ms
+[2026-05-18 12:51:10.664003723 +08:00 INFO] [apikey_login] personal_id="N123127908"
+[2026-05-18 12:51:10.845842964 +08:00 INFO] API Key account requires certificate validation
+[2026-05-18 12:51:11.028862595 +08:00 INFO] [apikey_login] Loaded permissions from XPSAZBIZS: {FutoptTrading, StockTrading, FutoptAccounting, MarketData, StockAccounting}
+[2026-05-18 12:51:11.569283824 +08:00 INFO] [future_option_mapping]: 540.328519ms
+[2026-05-18 12:51:11.751796056 +08:00 INFO] [future_option_mapping]: 180.495352ms
+[2026-05-18 12:51:12.143340238 +08:00 INFO] [future_option_mapping]: 391.255033ms
+[2026-05-18 12:51:12.340164049 +08:00 INFO] [future_option_mapping]: 181.552763ms
+[2026-05-18 12:51:44.530143470 +08:00 INFO] [apikey_login] personal_id="N123127908"
+[2026-05-18 12:51:44.711004729 +08:00 INFO] API Key account requires certificate validation
+[2026-05-18 12:51:44.893909587 +08:00 INFO] [apikey_login] Loaded permissions from XPSAZBIZS: {MarketData, FutoptTrading, FutoptAccounting, StockAccounting, StockTrading}
+[2026-05-18 12:51:45.431284250 +08:00 INFO] [future_option_mapping]: 537.281743ms
+[2026-05-18 12:51:45.612540350 +08:00 INFO] [future_option_mapping]: 179.13047ms
+[2026-05-18 12:51:46.003934957 +08:00 INFO] [future_option_mapping]: 391.107018ms
+[2026-05-18 12:51:46.197785578 +08:00 INFO] [future_option_mapping]: 182.105809ms
+[2026-05-18 12:51:46.216897144 +08:00 INFO] [place_futopt_order] account=Account { branch_no: "15901", account: "1247180", account_type: "futopt", name: "葉重慶" },order=FutOptOrder { oxtp: NewOrder, market_type: Option, date: "20260518", buy_sell: Sell, symbol: "TXOP202C20200", market: "TAIMEX", price_type: Market, price: None, lot: 1, time_in_force: ROD, order_type: New, symbol2: None, buy_sell2: None, user_def: "futures_order" }, is_async=false
+[2026-05-18 12:51:46.216943644 +08:00 WARN] [place_futopt_order] user_def contains invalid characters: '_'
+[2026-05-18 12:52:45.739099268 +08:00 INFO] [apikey_login] personal_id="N123127908"
+[2026-05-18 12:52:45.921126498 +08:00 INFO] API Key account requires certificate validation
+[2026-05-18 12:52:46.103853458 +08:00 INFO] [apikey_login] Loaded permissions from XPSAZBIZS: {StockTrading, MarketData, FutoptAccounting, FutoptTrading, StockAccounting}
+[2026-05-18 12:52:46.641300986 +08:00 INFO] [future_option_mapping]: 537.361258ms
+[2026-05-18 12:52:46.824424866 +08:00 INFO] [future_option_mapping]: 179.802052ms
+[2026-05-18 12:52:47.211817142 +08:00 INFO] [future_option_mapping]: 387.090236ms
+[2026-05-18 12:52:47.401716547 +08:00 INFO] [future_option_mapping]: 179.715923ms
+[2026-05-18 12:52:47.424446343 +08:00 INFO] [place_futopt_order] account=Account { branch_no: "15901", account: "1247180", account_type: "futopt", name: "葉重慶" },order=FutOptOrder { oxtp: NewOrder, market_type: UnDefined, date: "20260518", buy_sell: Sell, symbol: "TXOP202C20200", market: "TAIMEX", price_type: Market, price: None, lot: 1, time_in_force: ROD, order_type: New, symbol2: None, buy_sell2: None, user_def: "futures_order" }, is_async=false
+[2026-05-18 12:52:47.424466673 +08:00 WARN] [place_futopt_order] user_def contains invalid characters: '_'
+[2026-05-18 12:53:28.091873978 +08:00 INFO] [apikey_login] personal_id="N123127908"
+[2026-05-18 12:53:28.271803707 +08:00 INFO] API Key account requires certificate validation
+[2026-05-18 12:53:28.454121525 +08:00 INFO] [apikey_login] Loaded permissions from XPSAZBIZS: {FutoptAccounting, MarketData, FutoptTrading, StockAccounting, StockTrading}
+[2026-05-18 12:53:28.991049924 +08:00 INFO] [future_option_mapping]: 536.83391ms
+[2026-05-18 12:53:29.178524349 +08:00 INFO] [future_option_mapping]: 179.835529ms
+[2026-05-18 12:53:29.584196250 +08:00 INFO] [future_option_mapping]: 405.349741ms
+[2026-05-18 12:53:29.778275251 +08:00 INFO] [future_option_mapping]: 182.223258ms
+[2026-05-18 12:53:40.177975642 +08:00 INFO] [apikey_login] personal_id="N123127908"
+[2026-05-18 12:53:40.358557414 +08:00 INFO] API Key account requires certificate validation
+[2026-05-18 12:53:40.541926953 +08:00 INFO] [apikey_login] Loaded permissions from XPSAZBIZS: {FutoptTrading, StockAccounting, MarketData, StockTrading, FutoptAccounting}
+[2026-05-18 12:53:41.078985568 +08:00 INFO] [future_option_mapping]: 536.973715ms
+[2026-05-18 12:53:41.260713368 +08:00 INFO] [future_option_mapping]: 179.926371ms
+[2026-05-18 12:53:41.649870554 +08:00 INFO] [future_option_mapping]: 388.858236ms
+[2026-05-18 12:53:41.848988293 +08:00 INFO] [future_option_mapping]: 180.208311ms
+[2026-05-18 12:53:41.849928432 +08:00 INFO] [place_futopt_order] account=Account { branch_no: "15901", account: "1247180", account_type: "futopt", name: "葉重慶" },order=FutOptOrder { oxtp: NewOrder, market_type: UnDefined, date: "20260518", buy_sell: Sell, symbol: "TXOP202C20200", market: "TAIMEX", price_type: Limit, price: "15.5", lot: 1, time_in_force: ROD, order_type: New, symbol2: None, buy_sell2: None, user_def: "test" }, is_async=false
+[2026-05-18 12:58:26.137919570 +08:00 INFO] [place_futopt_order] account=Account { branch_no: "15901", account: "1247180", account_type: "futopt", name: "葉重慶" },order=FutOptOrder { oxtp: NewOrder, market_type: UnDefined, date: "20260518", buy_sell: Sell, symbol: "TXO20250620200P", market: "TAIMEX", price_type: Market, price: None, lot: 1, time_in_force: ROD, order_type: New, symbol2: None, buy_sell2: None, user_def: "futures_order" }, is_async=false
+[2026-05-18 12:58:26.137949930 +08:00 WARN] [place_futopt_order] user_def contains invalid characters: '_'
+[2026-05-18 12:58:49.110249059 +08:00 INFO] [place_futopt_order] account=Account { branch_no: "15901", account: "1247180", account_type: "futopt", name: "葉重慶" },order=FutOptOrder { oxtp: NewOrder, market_type: UnDefined, date: "20260518", buy_sell: Sell, symbol: "TXO20250620200P", market: "TAIMEX", price_type: Market, price: None, lot: 1, time_in_force: ROD, order_type: New, symbol2: None, buy_sell2: None, user_def: "futures_order" }, is_async=false
+[2026-05-18 12:58:49.110292459 +08:00 WARN] [place_futopt_order] user_def contains invalid characters: '_'
+[2026-05-18 12:59:40.567315490 +08:00 INFO] [place_futopt_order] account=Account { branch_no: "15901", account: "1247180", account_type: "futopt", name: "葉重慶" },order=FutOptOrder { oxtp: NewOrder, market_type: UnDefined, date: "20260518", buy_sell: Sell, symbol: "TXOP202P20200", market: "TAIMEX", price_type: Market, price: None, lot: 1, time_in_force: ROD, order_type: New, symbol2: None, buy_sell2: None, user_def: "futures_order" }, is_async=false
+[2026-05-18 12:59:40.567342520 +08:00 WARN] [place_futopt_order] user_def contains invalid characters: '_'
+[2026-05-18 13:00:05.115586952 +08:00 INFO] [query_hybrid_position]: 181.934954ms
+[2026-05-18 13:01:36.277346381 +08:00 INFO] [place_futopt_order] account=Account { branch_no: "15901", account: "1247180", account_type: "futopt", name: "葉重慶" },order=FutOptOrder { oxtp: NewOrder, market_type: UnDefined, date: "20260518", buy_sell: Sell, symbol: "TXO20200R6", market: "TAIMEX", price_type: Market, price: None, lot: 1, time_in_force: ROD, order_type: New, symbol2: None, buy_sell2: None, user_def: "futures_order" }, is_async=false
+[2026-05-18 13:01:36.277377261 +08:00 WARN] [place_futopt_order] user_def contains invalid characters: '_'
+[2026-05-18 13:01:48.362430334 +08:00 INFO] [place_futopt_order] account=Account { branch_no: "15901", account: "1247180", account_type: "futopt", name: "葉重慶" },order=FutOptOrder { oxtp: NewOrder, market_type: UnDefined, date: "20260518", buy_sell: Sell, symbol: "TXO20200R6", market: "TAIMEX", price_type: Market, price: None, lot: 1, time_in_force: ROD, order_type: New, symbol2: None, buy_sell2: None, user_def: "futures_order" }, is_async=false
+[2026-05-18 13:01:48.362457344 +08:00 WARN] [place_futopt_order] user_def contains invalid characters: '_'
+[2026-05-18 13:03:04.395969861 +08:00 INFO] [query_hybrid_position]: 182.123976ms
+[2026-05-18 13:04:14.081277535 +08:00 INFO] [apikey_login] personal_id="N123127908"
+[2026-05-18 13:04:14.262635195 +08:00 INFO] API Key account requires certificate validation
+[2026-05-18 13:04:14.445331934 +08:00 INFO] [apikey_login] Loaded permissions from XPSAZBIZS: {MarketData, StockTrading, FutoptAccounting, StockAccounting, FutoptTrading}
+[2026-05-18 13:04:14.981981395 +08:00 INFO] [future_option_mapping]: 536.545332ms
+[2026-05-18 13:04:15.163514555 +08:00 INFO] [future_option_mapping]: 179.33842ms
+[2026-05-18 13:04:15.553917207 +08:00 INFO] [future_option_mapping]: 390.148292ms
+[2026-05-18 13:04:15.747293744 +08:00 INFO] [future_option_mapping]: 180.486381ms
+[2026-05-18 13:04:15.770695677 +08:00 INFO] [place_futopt_order] account=Account { branch_no: "15901", account: "1247180", account_type: "futopt", name: "葉重慶" },order=FutOptOrder { oxtp: NewOrder, market_type: Option, date: "20260518", buy_sell: Sell, symbol: "TXO20200R6", market: "TAIMEX", price_type: Limit, price: "15.5", lot: 1, time_in_force: ROD, order_type: New, symbol2: None, buy_sell2: None, user_def: "futures_order" }, is_async=false
+[2026-05-18 13:04:15.770721477 +08:00 WARN] [place_futopt_order] user_def contains invalid characters: '_'
+[2026-05-18 13:04:56.974144622 +08:00 INFO] [place_futopt_order] account=Account { branch_no: "15901", account: "1247180", account_type: "futopt", name: "葉重慶" },order=FutOptOrder { oxtp: NewOrder, market_type: Option, date: "20260518", buy_sell: Sell, symbol: "TXO20200R6", market: "TAIMEX", price_type: Limit, price: "20000.0", lot: 1, time_in_force: ROD, order_type: New, symbol2: None, buy_sell2: None, user_def: "futures_order" }, is_async=false
+[2026-05-18 13:04:56.974173762 +08:00 WARN] [place_futopt_order] user_def contains invalid characters: '_'
+[2026-05-18 13:11:53.491712508 +08:00 INFO] [place_futopt_order] account=Account { branch_no: "15901", account: "1247180", account_type: "futopt", name: "葉重慶" },order=FutOptOrder { oxtp: NewOrder, market_type: Option, date: "20260518", buy_sell: Sell, symbol: "TXO20200R6", market: "TAIMEX", price_type: Limit, price: "15.5", lot: 1, time_in_force: ROD, order_type: New, symbol2: None, buy_sell2: None, user_def: "futures_order" }, is_async=false
+[2026-05-18 13:11:53.491742488 +08:00 WARN] [place_futopt_order] user_def contains invalid characters: '_'
+[2026-05-18 13:12:33.077961411 +08:00 INFO] [query_hybrid_position]: 182.546815ms
+[2026-05-18 13:12:46.078429588 +08:00 INFO] [query_hybrid_position]: 185.061584ms
+[2026-05-18 13:14:11.900652925 +08:00 INFO] [get equity]: 207.310601ms
+[2026-05-18 13:14:12.096199090 +08:00 INFO] [query_hybrid_position]: 182.860587ms
+[2026-05-18 13:23:58.516183224 +08:00 INFO] [apikey_login] personal_id="N123127908"
+[2026-05-18 13:23:58.697364818 +08:00 INFO] API Key account requires certificate validation
+[2026-05-18 13:23:58.879853 +08:00 INFO] [apikey_login] Loaded permissions from XPSAZBIZS: {StockTrading, FutoptAccounting, MarketData, StockAccounting, FutoptTrading}
+[2026-05-18 13:23:59.416846787 +08:00 INFO] [future_option_mapping]: 536.888547ms
+[2026-05-18 13:23:59.598658307 +08:00 INFO] [future_option_mapping]: 179.707321ms
+[2026-05-18 13:23:59.985592158 +08:00 INFO] [future_option_mapping]: 386.636671ms
+[2026-05-18 13:24:00.175249077 +08:00 INFO] [future_option_mapping]: 180.450052ms
+[2026-05-18 13:24:06.336995024 +08:00 INFO] [query_hybrid_position]: 183.616893ms
+[2026-05-18 13:24:19.109506757 +08:00 INFO] [query_hybrid_position]: 184.565895ms
+[2026-05-18 13:24:19.109905786 +08:00 INFO] [place_futopt_order] account=Account { branch_no: "15901", account: "1247180", account_type: "futopt", name: "葉重慶" },order=FutOptOrder { oxtp: NewOrder, market_type: Option, date: "20260518", buy_sell: Sell, symbol: "TXO20200R6", market: "TAIMEX", price_type: Limit, price: "13.0", lot: 1, time_in_force: ROD, order_type: New, symbol2: None, buy_sell2: None, user_def: "futures_order" }, is_async=false
+[2026-05-18 13:24:19.109929317 +08:00 WARN] [place_futopt_order] user_def contains invalid characters: '_'
+[2026-05-18 13:25:53.358542125 +08:00 INFO] [apikey_login] personal_id="N123127908"
+[2026-05-18 13:25:53.539116387 +08:00 INFO] API Key account requires certificate validation
+[2026-05-18 13:25:53.722000049 +08:00 INFO] [apikey_login] Loaded permissions from XPSAZBIZS: {StockTrading, MarketData, FutoptAccounting, FutoptTrading, StockAccounting}
+[2026-05-18 13:25:54.257585506 +08:00 INFO] [future_option_mapping]: 535.493447ms
+[2026-05-18 13:25:54.439252678 +08:00 INFO] [future_option_mapping]: 179.598572ms
+[2026-05-18 13:25:54.825216919 +08:00 INFO] [future_option_mapping]: 385.661181ms
+[2026-05-18 13:25:55.019609979 +08:00 INFO] [future_option_mapping]: 182.219272ms
+[2026-05-18 13:25:55.224180328 +08:00 INFO] [query_hybrid_position]: 181.317353ms
+[2026-05-18 13:26:03.115896312 +08:00 INFO] [query_hybrid_position]: 182.189482ms
+[2026-05-18 13:26:03.116389022 +08:00 INFO] [place_futopt_order] account=Account { branch_no: "15901", account: "1247180", account_type: "futopt", name: "葉重慶" },order=FutOptOrder { oxtp: NewOrder, market_type: Option, date: "20260518", buy_sell: Sell, symbol: "TXO20200R6", market: "TAIMEX", price_type: Limit, price: "13.0", lot: 1, time_in_force: ROD, order_type: Close, symbol2: None, buy_sell2: None, user_def: "futures_order" }, is_async=false
+[2026-05-18 13:26:03.116428242 +08:00 WARN] [place_futopt_order] user_def contains invalid characters: '_'
+[2026-05-18 13:26:03.326571870 +08:00 INFO] [place_futopt_order]: 210.197028ms
+[2026-05-18 13:26:58.364336506 +08:00 INFO] [apikey_login] personal_id="N123127908"
+[2026-05-18 13:26:58.546588638 +08:00 INFO] API Key account requires certificate validation
+[2026-05-18 13:26:58.730776820 +08:00 INFO] [apikey_login] Loaded permissions from XPSAZBIZS: {MarketData, StockAccounting, FutoptAccounting, StockTrading, FutoptTrading}
+[2026-05-18 13:26:59.271441817 +08:00 INFO] [future_option_mapping]: 540.535227ms
+[2026-05-18 13:26:59.455548329 +08:00 INFO] [future_option_mapping]: 181.957772ms
+[2026-05-18 13:26:59.849596429 +08:00 INFO] [future_option_mapping]: 393.726429ms
+[2026-05-18 13:27:00.047776278 +08:00 INFO] [future_option_mapping]: 184.169961ms
+[2026-05-18 13:27:05.522294562 +08:00 INFO] [query_hybrid_position]: 183.296252ms
+[2026-05-18 13:27:05.719353202 +08:00 INFO] [query_hybrid_position]: 183.413362ms
+[2026-05-18 13:27:05.719719022 +08:00 INFO] [place_futopt_order] account=Account { branch_no: "15901", account: "1247180", account_type: "futopt", name: "葉重慶" },order=FutOptOrder { oxtp: NewOrder, market_type: Option, date: "20260518", buy_sell: Sell, symbol: "TXO20200R6", market: "TAIMEX", price_type: Limit, price: "13.0", lot: 1, time_in_force: ROD, order_type: New, symbol2: None, buy_sell2: None, user_def: "futures_order" }, is_async=false
+[2026-05-18 13:27:05.719739882 +08:00 WARN] [place_futopt_order] user_def contains invalid characters: '_'
+[2026-05-18 13:28:12.388295316 +08:00 INFO] [query_hybrid_position]: 182.670602ms
+[2026-05-18 13:28:12.623866820 +08:00 INFO] [get equity]: 222.054036ms
