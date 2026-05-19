@@ -523,7 +523,7 @@ class FubonRepositoryImpl @Inject constructor(
 
 // Response data classes
 data class LoginResponse(
-    val isSuccess: Boolean,
+    @com.google.gson.annotations.SerializedName("success") val isSuccess: Boolean,
     val accounts: List<AccountDto>?,
     val message: String?
 )
@@ -535,7 +535,7 @@ data class AccountDto(
 )
 
 data class OrderResponse(
-    val isSuccess: Boolean,
+    @com.google.gson.annotations.SerializedName("success") val isSuccess: Boolean,
     val orderId: String?,
     val message: String?
 )
