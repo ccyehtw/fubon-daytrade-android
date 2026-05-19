@@ -205,28 +205,29 @@ class DayTradeViewModel @Inject constructor(
                 wsClient.subscribe(listOf(symbol))
 
                 // 觀察股票報價 Flow（當 symbol 的報價更新時自動通知 UI）
-                wsClient.stockQuotesFlow.collect { tickMap ->
-                    val tick = tickMap[symbol.uppercase()]
-                    if (tick != null) {
-                        _uiState.update {
-                            it.copy(
-                                currentQuote = StockTick(
-                                    symbol = tick.symbol,
-                                    price = tick.last_price,
-                                    change = tick.change,
-                                    changePercent = tick.change_percent,
-                                    volume = tick.volume,
-                                    bid = tick.bid_price,
-                                    ask = tick.ask_price,
-                                    tickSize = 0.5,
-                                    limitUpPrice = tick.limit_up_price,
-                                    limitDownPrice = tick.limit_down_price,
-                                    timestamp = System.currentTimeMillis()
-                                ),
-                                isQuoteLoading = false
-                            )
-                        }
-                    }
+                // 使用 first() 而非 collect() — collect 是無窮 suspend，永遠不會返回，
+                // 導致 isQuoteLoading 一直是 true，UI 永久轉圈
+                val tick = wsClient.stockQuotesFlow
+                    .map { tickMap -> tickMap[symbol.uppercase()] }
+                    .filterNotNull()
+                    .first()
+                _uiState.update {
+                    it.copy(
+                        currentQuote = StockTick(
+                            symbol = tick.symbol,
+                            price = tick.last_price,
+                            change = tick.change,
+                            changePercent = tick.change_percent,
+                            volume = tick.volume,
+                            bid = tick.bid_price,
+                            ask = tick.ask_price,
+                            tickSize = 0.5,
+                            limitUpPrice = tick.limit_up_price,
+                            limitDownPrice = tick.limit_down_price,
+                            timestamp = System.currentTimeMillis()
+                        ),
+                        isQuoteLoading = false
+                    )
                 }
             } catch (e: Exception) {
                 _uiState.update {
