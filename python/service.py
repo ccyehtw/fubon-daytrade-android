@@ -36,7 +36,7 @@ app = FastAPI(title="Fubon DayTrade Service", version="1.1.0")
 # ⚠️ 注意：「localhost:*」是 FastAPI CORSMiddleware 的 literal string（不支援 glob/wildcard），
 # 因此「http://localhost:*」不會匹配「http://localhost:8080」——這是安全默認行為。
 # Fix #8: 過濾空白字串，拒絕萬用字串 "*"（防止意外允許所有 origin）
-_origins_raw = os.environ.get("ALLOWED_ORIGINS", "http://localhost:*,http://10.0.2.2:*,http://127.0.0.1:*")
+_origins_raw = os.environ.get("ALLOWED_ORIGINS", "http://localhost:*,http://10.0.2.2:*,http://127.0.0.1:*,http://35.238.60.31:*")
 _allowed = [o.strip() for o in _origins_raw.split(",") if o.strip()]
 ALLOWED_ORIGINS = [o for o in _allowed if o != "*"]
 if not ALLOWED_ORIGINS:
@@ -152,8 +152,9 @@ class AccountInfo:
 class LoginRequest(BaseModel):
     personal_id: str
     api_key: str
-    cert_path: str
+    cert_path: Optional[str] = None
     cert_password: Optional[str] = None
+    cert_base64: Optional[str] = None  # base64-encoded .p12 cert content (preferred over cert_path)
 
 
 class LoginResponse:
@@ -357,13 +358,31 @@ async def health():
     return {"status": "healthy", "sdk_ready": sdk is not None}
 
 
-@app.post("/api/login", dependencies=[Depends(verify_api_key)])
+@app.post("/api/login")
 async def login(req: LoginRequest):
-    """Login endpoint - calls FubonSDK.apikey_login()"""
+    """Login endpoint - calls FubonSDK.apikey_login()
+    
+    ⚠️ 無 API Key 驗證（開放給已安裝 App 的用戶）
+    憑證可選：cert_base64（推荐，避免路徑不一致）
+    """
+    # 優先使用 base64 憑證，寫入 server-side 暫存檔
+    cert_server_path = None
+    if req.cert_base64:
+        try:
+            import base64, tempfile, os
+            cert_bytes = base64.b64decode(req.cert_base64)
+            fd, cert_server_path = tempfile.mkstemp(suffix=".p12", dir="/tmp")
+            os.write(fd, cert_bytes)
+            os.close(fd)
+            logger.info(f"Cert written to {cert_server_path}")
+        except Exception as e:
+            logger.error(f"Failed to decode cert_base64: {e}")
+            cert_server_path = None
+
     result = await sdk_login(
         personal_id=req.personal_id,
         api_key=req.api_key,
-        cert_path=req.cert_path,
+        cert_path=cert_server_path or req.cert_path,
         cert_password=req.cert_password
     )
     return result.to_dict()

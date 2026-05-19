@@ -26,16 +26,16 @@ import java.util.Locale
 import java.util.concurrent.TimeUnit
 
 /**
- * WebSocket 客戶端（OkHttp WebSocket）
+ * WebSocket client for real-time price subscription.
  *
- * 連線到 Python FastAPI 的 /ws 端點，訂閱即時股票/期貨報價。
+ * Connects to the Python FastAPI /ws endpoint for real-time stock/futures quotes.
  *
- * 使用方式：
- *   val client = WebSocketClient("ws://10.0.2.2:8080/ws")
+ * Usage:
+ *   val client = WebSocketClient("ws://35.238.60.31:8080/ws")
  *   client.connect()
  *   client.subscribe(listOf("2330", "TXF"))
  *
- *   // 觀察報價
+ *   // Observe quotes
  *   client.quotesFlow.collect { tick ->
  *       Log.d("Quote", "${tick.symbol}: ${tick.price}")
  *   }
@@ -90,7 +90,7 @@ sealed class WsEvent {
 }
 
 class WebSocketClient(
-    private val baseUrl: String = "ws://10.0.2.2:8080/ws"  // Android emulator localhost
+    private val baseUrl: String = "ws://35.238.60.31:8080/ws"  // GCP server external IP
 ) {
     private val tag = "WebSocketClient"
 

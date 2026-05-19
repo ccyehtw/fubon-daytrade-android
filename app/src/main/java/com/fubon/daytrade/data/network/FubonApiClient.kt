@@ -18,7 +18,9 @@ import java.util.concurrent.TimeUnit
  */
 object FubonApiClient {
     
-    private const val BASE_URL = "http://10.0.2.2:8080/" // Android emulator localhost
+    // TODO: 開發完成後將 DEBUG_URL 改為正式伺服器 IP 或網址
+    // 更換方式：修改此處 BASE_URL 的值
+    private const val BASE_URL = "http://35.238.60.31:8080/"
     private const val CONNECT_TIMEOUT_SEC = 15L
     private const val READ_TIMEOUT_SEC = 30L
     private const val WRITE_TIMEOUT_SEC = 15L

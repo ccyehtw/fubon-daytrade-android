@@ -2,6 +2,9 @@ package com.fubon.daytrade.data.repository
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.net.Uri
+import android.util.Base64
+import android.util.Log
 import androidx.datastore.preferences.preferencesDataStore
 import com.fubon.daytrade.data.model.AccountInfo
 import com.fubon.daytrade.data.network.NetworkResult
@@ -41,10 +44,17 @@ class FubonRepositoryImpl @Inject constructor(
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
         .writeTimeout(15, TimeUnit.SECONDS)
+        .addInterceptor { chain ->
+            val req = chain.request().newBuilder()
+                .addHeader("X-API-Key", apiKey)
+                .build()
+            chain.proceed(req)
+        }
         .build()
 
     private val gson = Gson()
-    private val baseUrl = "http://10.0.2.2:8080" // Android emulator localhost
+    private val baseUrl = "http://35.238.60.31:8080" // GCP server external IP
+    private val apiKey = "0586E47E4932C8A4A4D27AE52910384B2EBBC9D6B8773487527FE42CFF328E5C" // Fubon API Key
 
     private val prefs: SharedPreferences by lazy {
         context.getSharedPreferences("fubon_daytrade", Context.MODE_PRIVATE)
@@ -61,6 +71,20 @@ class FubonRepositoryImpl @Inject constructor(
     }
 
     private val _accounts = MutableStateFlow<List<AccountInfo>>(emptyList())
+
+    /** Read content URI as base64 string (for .p12 cert files) */
+    private suspend fun readContentAsBase64(uriString: String): String? = withContext(Dispatchers.IO) {
+        try {
+            val uri = Uri.parse(uriString)
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                val bytes = input.readBytes()
+                Base64.encodeToString(bytes, Base64.NO_WRAP)
+            }
+        } catch (e: Exception) {
+            Log.w("FubonRepo", "Failed to read cert from URI: $e")
+            null
+        }
+    }
 
     override suspend fun login(
         personalId: String,
@@ -88,15 +112,19 @@ class FubonRepositoryImpl @Inject constructor(
         certPassword: String
     ): NetworkResult<List<AccountInfo>> = withContext(Dispatchers.IO) {
         try {
-            val requestBody = mapOf(
+            // Read cert file as base64 from content URI (e.g. content://...)
+            val certBase64 = readContentAsBase64(certPath)
+
+            val requestBody = mutableMapOf(
                 "personal_id" to personalId,
                 "api_key" to apiKey,
-                "cert_path" to certPath,
                 "cert_password" to certPassword
             )
+            certBase64?.let { requestBody["cert_base64"] = it }
 
             val request = Request.Builder()
                 .url("$baseUrl/api/login")
+                .addHeader("X-API-Key", apiKey)
                 .post(gson.toJson(requestBody).toRequestBody("application/json".toMediaType()))
                 .build()
 
