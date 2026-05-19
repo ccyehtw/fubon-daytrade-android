@@ -1,2 +1,30 @@
 [2026-05-20 01:38:16.698179435 +08:00 INFO] [apikey_login] personal_id="N123127908"
 [2026-05-20 01:38:41.250397339 +08:00 INFO] [apikey_login] personal_id="N123127908"
+[2026-05-20 02:31:48.429653007 +08:00 INFO] [apikey_login] personal_id="N123127908"
+[2026-05-20 02:31:48.617255350 +08:00 INFO] API Key account requires certificate validation
+[2026-05-20 02:31:48.801375453 +08:00 INFO] [apikey_login] Loaded permissions from XPSAZBIZS: {StockAccounting, StockTrading, MarketData, FutoptAccounting, FutoptTrading}
+[2026-05-20 02:31:49.339325222 +08:00 INFO] [future_option_mapping]: 537.353389ms
+[2026-05-20 02:31:49.522888625 +08:00 INFO] [future_option_mapping]: 180.397873ms
+[2026-05-20 02:31:49.912444110 +08:00 INFO] [future_option_mapping]: 389.167205ms
+[2026-05-20 02:31:50.109124892 +08:00 INFO] [future_option_mapping]: 180.270613ms
+[2026-05-20 02:33:16.211525621 +08:00 INFO] [apikey_login] personal_id="N123127908"
+[2026-05-20 02:33:16.393563485 +08:00 INFO] API Key account requires certificate validation
+[2026-05-20 02:33:16.577281368 +08:00 INFO] [apikey_login] Loaded permissions from XPSAZBIZS: {FutoptTrading, FutoptAccounting, MarketData, StockTrading, StockAccounting}
+[2026-05-20 02:33:17.117853258 +08:00 INFO] [future_option_mapping]: 540.44128ms
+[2026-05-20 02:33:17.300817262 +08:00 INFO] [future_option_mapping]: 180.869414ms
+[2026-05-20 02:33:17.691463357 +08:00 INFO] [future_option_mapping]: 390.247275ms
+[2026-05-20 02:33:17.887771950 +08:00 INFO] [future_option_mapping]: 182.236643ms
+[2026-05-20 04:29:29.520305198 +08:00 INFO] [apikey_login] personal_id="N123127908"
+[2026-05-20 04:29:29.702543946 +08:00 INFO] API Key account requires certificate validation
+[2026-05-20 04:29:29.887093425 +08:00 INFO] [apikey_login] Loaded permissions from XPSAZBIZS: {StockTrading, FutoptAccounting, StockAccounting, FutoptTrading, MarketData}
+[2026-05-20 04:29:30.425976659 +08:00 INFO] [future_option_mapping]: 538.759534ms
+[2026-05-20 04:29:30.615982006 +08:00 INFO] [future_option_mapping]: 180.807257ms
+[2026-05-20 04:29:31.180652671 +08:00 INFO] [future_option_mapping]: 564.376285ms
+[2026-05-20 04:29:31.387982018 +08:00 INFO] [future_option_mapping]: 183.066768ms
+[2026-05-20 04:36:18.046866921 +08:00 INFO] [apikey_login] personal_id="N123127908"
+[2026-05-20 04:36:18.229229467 +08:00 INFO] API Key account requires certificate validation
+[2026-05-20 04:36:18.413549604 +08:00 INFO] [apikey_login] Loaded permissions from XPSAZBIZS: {FutoptAccounting, StockTrading, StockAccounting, MarketData, FutoptTrading}
+[2026-05-20 04:36:18.952018363 +08:00 INFO] [future_option_mapping]: 538.359529ms
+[2026-05-20 04:36:19.134777800 +08:00 INFO] [future_option_mapping]: 180.600927ms
+[2026-05-20 04:36:19.527580470 +08:00 INFO] [future_option_mapping]: 392.38872ms
+[2026-05-20 04:36:19.722961665 +08:00 INFO] [future_option_mapping]: 183.080406ms

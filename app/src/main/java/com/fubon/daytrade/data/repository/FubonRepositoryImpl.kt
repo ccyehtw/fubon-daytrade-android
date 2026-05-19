@@ -529,9 +529,9 @@ data class LoginResponse(
 )
 
 data class AccountDto(
-    val accountId: String,
-    val accountType: String,
-    val displayName: String
+    @com.google.gson.annotations.SerializedName("account_id") val accountId: String,
+    @com.google.gson.annotations.SerializedName("account_type") val accountType: String,
+    @com.google.gson.annotations.SerializedName("display_name") val displayName: String
 )
 
 data class OrderResponse(
