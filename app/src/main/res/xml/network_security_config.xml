@@ -7,6 +7,11 @@
         </trust-anchors>
     </base-config>
 
+    <!-- GCP Server：允許連接到 Python service（HTTP，明文傳輸） -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">35.238.60.31</domain>
+    </domain-config>
+
     <!-- Debug ONLY：允許 emulator localhost HTTP，便於本機開發調試 -->
     <domain-config cleartextTrafficPermitted="true">
         <domain includeSubdomains="true">localhost</domain>
