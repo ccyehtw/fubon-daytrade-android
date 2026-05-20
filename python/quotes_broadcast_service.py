@@ -314,9 +314,15 @@ class QuotesBroadcastService:
 
 
 # ════════════════════════════════════════════════════════════════════
-# 全域實例
+# 全域單例（修復：確保同一實例被複用）
 # ════════════════════════════════════════════════════════════════════
+
+_instance: Optional[QuotesBroadcastService] = None
+
 
 def get_quotes_broadcast_service() -> QuotesBroadcastService:
     """取得 QuotesBroadcastService 單例"""
-    return QuotesBroadcastService()
+    global _instance
+    if _instance is None:
+        _instance = QuotesBroadcastService()
+    return _instance
