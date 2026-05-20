@@ -8,6 +8,7 @@ import com.fubon.daytrade.data.network.OrderCallbackManager
 import com.fubon.daytrade.data.network.OrderStatus
 import com.fubon.daytrade.data.network.OrderUpdateEvent
 import com.fubon.daytrade.data.network.WebSocketClient
+import com.fubon.daytrade.data.network.WsEvent
 import com.fubon.daytrade.data.repository.FubonRepository
 import com.fubon.daytrade.data.repository.RetryHelper
 import com.fubon.daytrade.data.repository.StockTick
@@ -26,6 +27,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
