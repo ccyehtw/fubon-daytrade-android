@@ -109,6 +109,7 @@ class WebSocketClient(
     private var reconnectAttempts = 0
     private val maxReconnectAttempts = 5
     private val reconnectDelayMs = 3000L
+    private var pendingResubscribe = false  // auth_ok 後是否需要重新訂閱
 
     // 訂閱的 symbols
     private val subscribedSymbols = mutableSetOf<String>()
@@ -149,10 +150,17 @@ class WebSocketClient(
                 Log.d(tag, "WebSocket 已連線")
                 isConnected.value = true
                 reconnectAttempts = 0
-                // 連線後自動重訂閱之前的 symbols
-                if (subscribedSymbols.isNotEmpty()) {
-                    resubscribe()
-                }
+
+                // ── 重要：Server 要求第一筆訊息是 auth 事件 ──
+                send(mapOf(
+                    "event" to "auth",
+                    "api_key" to "0586E47E4932C8A4A4D27AE52910384B2EBBC9D6B8773487527FE42CFF328E5C"
+                ))
+
+                // 連線後自動重訂閱之前的 symbols（等待 auth_ok 回來後再訂閱）
+                // 我們不能在此直接訂閱，因為 auth_ok 還沒回來
+                // 改用標記，在 auth_ok 回來時觸發
+                pendingResubscribe = true
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
@@ -284,6 +292,15 @@ class WebSocketClient(
                     val clientId = json.get("client_id")?.asString ?: ""
                     Log.d(tag, "已連線，client_id=$clientId")
                     _eventsFlow.emit(WsEvent.Connected(clientId))
+                }
+
+                "auth_ok" -> {
+                    Log.d(tag, "認證成功")
+                    // auth_ok 回來了，如果有之前待命的重訂閱，現在執行
+                    if (pendingResubscribe) {
+                        pendingResubscribe = false
+                        resubscribe()
+                    }
                 }
 
                 "quote" -> {
