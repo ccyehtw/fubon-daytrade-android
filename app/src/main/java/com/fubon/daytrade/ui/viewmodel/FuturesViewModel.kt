@@ -13,8 +13,12 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.Calendar
 import javax.inject.Inject
 
@@ -203,35 +207,56 @@ class FuturesViewModel @Inject constructor(
 
             try {
                 val wsClient = repository.getWebSocketClient()
+
+                // 先連線（如果尚未連線），並等待認證完成
                 if (!wsClient.connected) {
                     wsClient.connect()
+                    // 等待 WebSocket 認證完成（最多 10 秒）
+                    withTimeoutOrNull(10_000) {
+                        wsClient.eventsFlow
+                            .filter { it is WsEvent.Connected }
+                            .first()
+                    }
                 }
+
+                // 訂閱期貨報價
                 wsClient.subscribe(listOf(symbol.uppercase()))
 
-                // 收集期貨報價 Flow
-                wsClient.futuresQuotesFlow.collect { tickMap ->
-                    val tick = tickMap[symbol.uppercase()]
-                    if (tick != null) {
-                        _uiState.update {
-                            it.copy(
-                                currentQuote = FuturesTick(
-                                    symbol = tick.symbol,
-                                    lastPrice = tick.last_price,
-                                    change = tick.change,
-                                    changePercent = tick.change_percent,
-                                    volume = tick.volume,
-                                    bid = tick.bid_price,
-                                    ask = tick.ask_price,
-                                    tickSize = 1.0,  // 期貨預設 1 點
-                                    limitUpPrice = 0.0,
-                                    limitDownPrice = 0.0,
-                                    timestamp = System.currentTimeMillis()
-                                ),
-                                isQuoteLoading = false
-                            )
-                        }
-                        // 更新持倉的現價（如果有相同 symbol 的持倉）
-                        updatePositionPrice(symbol.uppercase(), tick.last_price)
+                // 等待第一筆報價（最多 15 秒）
+                val tickMap = withTimeoutOrNull(15_000) {
+                    wsClient.futuresQuotesFlow
+                        .map { it[symbol.uppercase()] }
+                        .filterNotNull()
+                        .first()
+                }
+
+                if (tickMap != null) {
+                    _uiState.update {
+                        it.copy(
+                            currentQuote = FuturesTick(
+                                symbol = tickMap.symbol,
+                                lastPrice = tickMap.last_price,
+                                change = tickMap.change,
+                                changePercent = tickMap.change_percent,
+                                volume = tickMap.volume,
+                                bid = tickMap.bid_price,
+                                ask = tickMap.ask_price,
+                                tickSize = 1.0,  // 期貨預設 1 點
+                                limitUpPrice = 0.0,
+                                limitDownPrice = 0.0,
+                                timestamp = System.currentTimeMillis()
+                            ),
+                            isQuoteLoading = false
+                        )
+                    }
+                    // 更新持倉的現價（如果有相同 symbol 的持倉）
+                    updatePositionPrice(symbol.uppercase(), tickMap.last_price)
+                } else {
+                    _uiState.update {
+                        it.copy(
+                            isQuoteLoading = false,
+                            errorMessage = "查無此期貨報價，請確認代碼"
+                        )
                     }
                 }
             } catch (e: Exception) {

@@ -296,6 +296,9 @@ class WebSocketClient(
 
                 "auth_ok" -> {
                     Log.d(tag, "認證成功")
+                    // Server 會在 auth_ok 之後才發 connected，所以我們先設定連線狀態
+                    isConnected.value = true
+                    _eventsFlow.emit(WsEvent.Connected(clientId = ""))
                     // auth_ok 回來了，如果有之前待命的重訂閱，現在執行
                     if (pendingResubscribe) {
                         pendingResubscribe = false
