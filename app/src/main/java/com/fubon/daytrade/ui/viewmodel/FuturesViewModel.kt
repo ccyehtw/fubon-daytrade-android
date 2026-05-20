@@ -7,6 +7,7 @@ import com.fubon.daytrade.data.network.OrderCallbackManager
 import com.fubon.daytrade.data.network.OrderStatus
 import com.fubon.daytrade.data.network.OrderUpdateEvent
 import com.fubon.daytrade.data.network.WebSocketClient
+import com.fubon.daytrade.data.network.WsEvent
 import com.fubon.daytrade.data.repository.FubonRepository
 import com.fubon.daytrade.domain.model.BuySell
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -226,7 +227,7 @@ class FuturesViewModel @Inject constructor(
                 val tickMap = withTimeoutOrNull(15_000) {
                     wsClient.futuresQuotesFlow
                         .map { it[symbol.uppercase()] }
-                        .filterNotNull()
+                        .filter { it != null }
                         .first()
                 }
 
