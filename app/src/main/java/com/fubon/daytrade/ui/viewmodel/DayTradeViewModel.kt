@@ -19,11 +19,13 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -200,37 +202,56 @@ class DayTradeViewModel @Inject constructor(
             _uiState.update { it.copy(isQuoteLoading = true, errorMessage = null) }
 
             try {
-                // 透過 WebSocket 取得即時報價
                 val wsClient = repository.getWebSocketClient()
+
+                // 先連線（如果尚未連線），並等待連線完成
                 if (!wsClient.connected) {
                     wsClient.connect()
+                    // 等待 WebSocket 連線完成（最多 10 秒）
+                    withTimeoutOrNull(10_000) {
+                        wsClient.eventsFlow
+                            .filter { it is WsEvent.Connected }
+                            .first()
+                    }
                 }
-                wsClient.subscribe(listOf(symbol))
 
-                // 觀察股票報價 Flow（當 symbol 的報價更新時自動通知 UI）
-                // 使用 first() 而非 collect() — collect 是無窮 suspend，永遠不會返回，
-                // 導致 isQuoteLoading 一直是 true，UI 永久轉圈
-                val tick = wsClient.stockQuotesFlow
-                    .map { tickMap -> tickMap[symbol.uppercase()] }
-                    .filterNotNull()
-                    .first()
-                _uiState.update {
-                    it.copy(
-                        currentQuote = StockTick(
-                            symbol = tick.symbol,
-                            price = tick.last_price,
-                            change = tick.change,
-                            changePercent = tick.change_percent,
-                            volume = tick.volume,
-                            bid = tick.bid_price,
-                            ask = tick.ask_price,
-                            tickSize = 0.5,
-                            limitUpPrice = tick.limit_up_price,
-                            limitDownPrice = tick.limit_down_price,
-                            timestamp = System.currentTimeMillis()
-                        ),
-                        isQuoteLoading = false
-                    )
+                // 訂閱股票報價
+                wsClient.subscribe(listOf(symbol.uppercase()))
+
+                // 等待第一筆報價（最多 15 秒）
+                val tick = withTimeoutOrNull(15_000) {
+                    wsClient.stockQuotesFlow
+                        .map { tickMap -> tickMap[symbol.uppercase()] }
+                        .filterNotNull()
+                        .first()
+                }
+
+                if (tick != null) {
+                    _uiState.update {
+                        it.copy(
+                            currentQuote = StockTick(
+                                symbol = tick.symbol,
+                                price = tick.last_price,
+                                change = tick.change,
+                                changePercent = tick.change_percent,
+                                volume = tick.volume,
+                                bid = tick.bid_price,
+                                ask = tick.ask_price,
+                                tickSize = 0.5,
+                                limitUpPrice = tick.limit_up_price,
+                                limitDownPrice = tick.limit_down_price,
+                                timestamp = System.currentTimeMillis()
+                            ),
+                            isQuoteLoading = false
+                        )
+                    }
+                } else {
+                    _uiState.update {
+                        it.copy(
+                            isQuoteLoading = false,
+                            errorMessage = "查無此商品報價，請確認代碼"
+                        )
+                    }
                 }
             } catch (e: Exception) {
                 _uiState.update {

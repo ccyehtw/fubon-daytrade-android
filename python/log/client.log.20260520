@@ -73,3 +73,17 @@
 [2026-05-20 07:59:42.545604567 +08:00 INFO] [get equity]: 202.741225ms
 [2026-05-20 08:05:43.454573185 +08:00 INFO] [get equity]: 203.933897ms
 [2026-05-20 08:08:07.137623145 +08:00 INFO] [get equity]: 204.665402ms
+[2026-05-20 08:48:58.766562782 +08:00 INFO] [apikey_login] personal_id="N123127908"
+[2026-05-20 08:48:58.951513293 +08:00 INFO] API Key account requires certificate validation
+[2026-05-20 08:48:59.135156594 +08:00 INFO] [apikey_login] Loaded permissions from XPSAZBIZS: {StockAccounting, StockTrading, FutoptTrading, MarketData, FutoptAccounting}
+[2026-05-20 08:48:59.676815786 +08:00 INFO] [future_option_mapping]: 541.323602ms
+[2026-05-20 08:48:59.864800006 +08:00 INFO] [future_option_mapping]: 180.08565ms
+[2026-05-20 08:49:00.255865717 +08:00 INFO] [future_option_mapping]: 390.303541ms
+[2026-05-20 08:49:00.460584157 +08:00 INFO] [future_option_mapping]: 180.688681ms
+[2026-05-20 08:49:51.040314044 +08:00 INFO] [get equity]: 204.159431ms
+[2026-05-20 08:49:51.245855814 +08:00 INFO] [get equity]: 203.35496ms
+[2026-05-20 08:49:53.098805904 +08:00 INFO] [get equity]: 203.433911ms
+[2026-05-20 08:49:56.819257444 +08:00 INFO] [get equity]: 204.10067ms
+[2026-05-20 08:51:02.871022865 +08:00 INFO] [get equity]: 204.684651ms
+[2026-05-20 08:54:53.235290099 +08:00 INFO] [get equity]: 241.888021ms
+[2026-05-20 08:55:45.639984614 +08:00 INFO] [get equity]: 231.499031ms
