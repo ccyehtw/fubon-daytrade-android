@@ -59,6 +59,10 @@ data class FuturesPosition(
 // UI State
 // ══════════════════════════════════════════════════════════════
 
+// ══════════════════════════════════════════════════════════════
+// 條件單追蹤狀態機（Phase 1 & 2）- 已移至 TrackingState.kt
+// ══════════════════════════════════════════════════════════════
+
 data class FuturesUiState(
     // Account info
     val currentAccount: AccountInfo? = null,
@@ -85,6 +89,11 @@ data class FuturesUiState(
 
     // Error state
     val errorMessage: String? = null,
+
+    // 條件單追蹤狀態機
+    val trackingPhase: TrackingPhase = TrackingPhase.Idle,
+    val trackingMode: TrackingMode = TrackingMode.None,
+    val conditionParams: ConditionParams? = null,
 )
 
 /** 期貨訂單狀態追蹤 */
@@ -129,6 +138,42 @@ class FuturesViewModel @Inject constructor(
         loadAccounts()
         checkMargin()
         observeOrderUpdates()
+        observeFuturesQuotes()
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // 即時報價監聽（WebSocket 持續推送，驅動 Phase 評估）
+    // ──────────────────────────────────────────────────────────
+
+    private fun observeFuturesQuotes() {
+        viewModelScope.launch {
+            repository.getWebSocketClient().futuresQuotesFlow.collect { quotesMap ->
+                val symbol = _uiState.value.quoteSymbol
+                val tick = quotesMap[symbol] ?: return@collect
+                // 更新 UI 現價
+                _uiState.update { state ->
+                    state.copy(
+                        currentQuote = FuturesTick(
+                            symbol = tick.symbol,
+                            lastPrice = tick.last_price,
+                            change = tick.change,
+                            changePercent = tick.change_percent,
+                            volume = tick.volume,
+                            bid = tick.bid_price,
+                            ask = tick.ask_price,
+                            tickSize = 1.0,
+                            limitUpPrice = null,
+                            limitDownPrice = null,
+                            timestamp = System.currentTimeMillis()
+                        )
+                    )
+                }
+                // 更新持倉現價
+                updatePositionPrice(symbol, tick.last_price)
+                // 評估條件單 Phase
+                onQuoteUpdate(tick.last_price)
+            }
+        }
     }
 
     // ──────────────────────────────────────────────────────────
@@ -481,6 +526,201 @@ class FuturesViewModel @Inject constructor(
                 // Silent fail for refresh
             }
         }
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // 條件單追蹤：Phase 狀態機
+    // ══════════════════════════════════════════════════════════════
+
+    /**
+     * 啟動條件單追蹤（用戶按下 A 或 B 按鈕時呼叫）
+     * mode: BreakdownBuy（按 A） 或 BreakoutSell（按 B）
+     * currentPrice: 目前報價
+     */
+    fun startTracking(
+        mode: TrackingMode,
+        lowPrice: Double?,   // breakdown_buy 的低點（用戶輸入）
+        highPrice: Double?,  // breakout_sell 的高點（用戶輸入）
+        reboundTicks: Int,
+        retraceTicks: Int,
+        stopLossPct: Double,
+        quantity: Int,
+        tickSize: Double
+    ) {
+        val params = ConditionParams(
+            mode = mode,
+            lowPrice = lowPrice,
+            highPrice = highPrice,
+            reboundTicks = reboundTicks,
+            retraceTicks = retraceTicks,
+            stopLossPct = stopLossPct,
+            quantity = quantity,
+            tickSize = tickSize
+        )
+
+        when (mode) {
+            TrackingMode.BreakdownBuy -> {
+                // 設定低點後，進入 Phase1，等待跌破低點
+                _uiState.update {
+                    it.copy(
+                        trackingPhase = TrackingPhase.Phase1_Low_Set,
+                        trackingMode = mode,
+                        conditionParams = params,
+                        orderMessage = "🔔 條件單追蹤啟動：等跌破低點 ${lowPrice}"
+                    )
+                }
+            }
+            TrackingMode.BreakoutSell -> {
+                // 設定高點後，進入 Phase1，等待突破高點
+                _uiState.update {
+                    it.copy(
+                        trackingPhase = TrackingPhase.Phase1_High_Set,
+                        trackingMode = mode,
+                        conditionParams = params,
+                        orderMessage = "🔔 條件單追蹤啟動：等突破高點 ${highPrice}"
+                    )
+                }
+            }
+            TrackingMode.None -> { /* 不可能走到這裡 */ }
+        }
+    }
+
+    /**
+     * 取消條件單追蹤
+     */
+    fun cancelTracking() {
+        _uiState.update {
+            it.copy(
+                trackingPhase = TrackingPhase.Idle,
+                trackingMode = TrackingMode.None,
+                conditionParams = null,
+                orderMessage = "❌ 條件單已取消"
+            )
+        }
+    }
+
+    /**
+     * 處理即時報價，評估 Phase 1 / Phase 2 條件（由 WebSocket 推送驅動）
+     * 每次收到新報價時呼叫此方法
+     */
+    fun onQuoteUpdate(price: Double) {
+        val phase = _uiState.value.trackingPhase
+        val params = _uiState.value.conditionParams ?: return
+        val tickSize = params.tickSize
+
+        when (phase) {
+            TrackingPhase.Phase1_Low_Set -> {
+                // 等待跌破 lowPrice
+                val lowPrice = params.lowPrice ?: return
+                if (price <= lowPrice) {
+                    // Phase 1 滿足：已跌破低點，進入 Phase2，等反彈
+                    _uiState.update {
+                        it.copy(
+                            trackingPhase = TrackingPhase.Phase2_Rebound,
+                            orderMessage = "📈 已跌破低點 ${lowPrice}，等反彈 ${params.reboundTicks} 檔"
+                        )
+                    }
+                }
+            }
+            TrackingPhase.Phase1_High_Set -> {
+                // 等待突破 highPrice
+                val highPrice = params.highPrice ?: return
+                if (price >= highPrice) {
+                    // Phase 1 滿足：已突破高點，進入 Phase2，等回檔
+                    _uiState.update {
+                        it.copy(
+                            trackingPhase = TrackingPhase.Phase2_Retrace,
+                            orderMessage = "📉 已突破高點 ${highPrice}，等回檔 ${params.retraceTicks} 檔"
+                        )
+                    }
+                }
+            }
+            TrackingPhase.Phase2_Rebound -> {
+                // 已跌破低點，等反彈 N 檔後買進
+                val lowPrice = params.lowPrice ?: return
+                val reboundTarget = lowPrice + (params.reboundTicks * tickSize)
+                if (price >= reboundTarget) {
+                    // Phase 2 滿足：反彈達標，市價買進
+                    executeMarketOrder(TrackingMode.BreakdownBuy, params)
+                }
+            }
+            TrackingPhase.Phase2_Retrace -> {
+                // 已突破高點，等回檔 N 檔後賣出
+                val highPrice = params.highPrice ?: return
+                val retraceTarget = highPrice - (params.retraceTicks * tickSize)
+                if (price <= retraceTarget) {
+                    // Phase 2 滿足：回檔達標，市價賣出
+                    executeMarketOrder(TrackingMode.BreakoutSell, params)
+                }
+            }
+            else -> { /* Idle，不處理 */ }
+        }
+    }
+
+    /**
+     * 執行市價單（建倉）
+     */
+    private fun executeMarketOrder(mode: TrackingMode, params: ConditionParams) {
+        val account = _uiState.value.currentAccount ?: return
+        val symbol = _uiState.value.quoteSymbol
+        val buySell = if (mode == TrackingMode.BreakdownBuy) "buy" else "sell"
+        val entryMode = if (mode == TrackingMode.BreakdownBuy) "breakdown_buy" else "breakout_sell"
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isOrderLoading = true) }
+            try {
+                val result = repository.placeFuturesOrder(
+                    accountId = account.accountId,
+                    symbol = symbol,
+                    price = null,  // 市價單
+                    quantity = params.quantity,
+                    buySell = buySell,
+                    stopLossPct = params.stopLossPct,
+                    entryMode = entryMode
+                )
+                result.fold(
+                    onSuccess = { orderId ->
+                        _uiState.update {
+                            it.copy(
+                                isOrderLoading = false,
+                                trackingPhase = TrackingPhase.Idle,  // 條件單結束
+                                trackingMode = TrackingMode.None,
+                                conditionParams = null,
+                                orderMessage = "✅ 條件單成交建倉: $orderId"
+                            )
+                        }
+                        refreshFuturesPositions()
+                        checkMargin()
+                    },
+                    onFailure = { error ->
+                        _uiState.update {
+                            it.copy(
+                                isOrderLoading = false,
+                                errorMessage = "建倉失敗: ${error.message}"
+                            )
+                        }
+                    }
+                )
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(isOrderLoading = false, errorMessage = "網路錯誤: ${e.message}")
+                }
+            }
+        }
+    }
+
+    /**
+     * 建倉後，反向按鈕變成「平倉」
+     * 如果用 breakdown_buy 建倉，則按 B 會平倉（反向卖出）
+     * 如果用 breakout_sell 建倉，則按 A 會平倉（反向买入）
+     */
+    fun closeWithOppositeButton() {
+        val mode = _uiState.value.trackingMode
+        if (mode == TrackingMode.None || _uiState.value.futuresPositions.isEmpty()) return
+
+        // 找到最新的持倉
+        val position = _uiState.value.futuresPositions.first() ?: return
+        closeFuturesPosition(position)
     }
 
     // ──────────────────────────────────────────────────────────

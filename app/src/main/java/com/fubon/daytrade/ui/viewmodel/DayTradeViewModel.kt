@@ -59,14 +59,19 @@ data class DayTradeUiState(
     // Order status tracking (orderId -> status)
     val orderStatuses: Map<String, DayTradeOrderStatusItem> = emptyMap(),
     
-    // Auto square
+// Auto square
     val autoSquareTime: String = "13:20",
     val autoSquareEnabled: Boolean = true,
     val autoSquareStatus: AutoSquareStatus = AutoSquareStatus.Pending,
-    
+
     // Error state
     val errorMessage: String? = null,
-    val errorState: ErrorState = ErrorState.None
+    val errorState: ErrorState = ErrorState.None,
+
+    // 條件單追蹤狀態機（與 FuturesScreen 相同邏輯）
+    val trackingPhase: TrackingPhase = TrackingPhase.Idle,
+    val trackingMode: TrackingMode = TrackingMode.None,
+    val conditionParams: ConditionParams? = null,
 )
 
 /** 當日沖訂單狀態追蹤 */
@@ -126,6 +131,40 @@ class DayTradeViewModel @Inject constructor(
     init {
         loadAccounts()
         observeOrderUpdates()
+        observeStockQuotes()
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // 即時報價監聽（WebSocket 持續推送，驅動 Phase 評估）
+    // ──────────────────────────────────────────────────────────
+
+    private fun observeStockQuotes() {
+        viewModelScope.launch {
+            repository.getWebSocketClient().stockQuotesFlow.collect { quotesMap ->
+                val symbol = _uiState.value.quoteSymbol
+                val tick = quotesMap[symbol] ?: return@collect
+                // 更新 UI 現價
+                _uiState.update { state ->
+                    state.copy(
+                        currentQuote = StockTick(
+                            symbol = tick.symbol,
+                            price = tick.last_price,
+                            change = tick.change,
+                            changePercent = tick.change_percent,
+                            volume = tick.volume,
+                            bid = tick.bid_price,
+                            ask = tick.ask_price,
+                            tickSize = 0.5,
+                            limitUpPrice = tick.limit_up_price,
+                            limitDownPrice = tick.limit_down_price,
+                            timestamp = System.currentTimeMillis()
+                        )
+                    )
+                }
+                // 評估條件單 Phase
+                onQuoteUpdate(tick.last_price, tickSize = 0.5)
+            }
+        }
     }
 
     // ──────────────────────────────────────────────────────────
@@ -491,5 +530,200 @@ class DayTradeViewModel @Inject constructor(
     fun switchAccount(account: AccountInfo) {
         _uiState.update { it.copy(currentAccount = account) }
         refreshDayTradePositions()
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    // 條件單追蹤：Phase 狀態機（與 FuturesScreen 相同邏輯）
+    // ══════════════════════════════════════════════════════════════
+
+    /**
+     * 啟動條件單追蹤（用戶按下「追低點買入」或「追高點賣出」按鈕時呼叫）
+     */
+    fun startTracking(
+        mode: TrackingMode,
+        lowPrice: Double?,
+        highPrice: Double?,
+        reboundTicks: Int,
+        retraceTicks: Int,
+        stopLossPct: Double,
+        quantity: Int,
+        tickSize: Double
+    ) {
+        _uiState.update {
+            it.copy(
+                trackingMode = mode,
+                trackingPhase = when (mode) {
+                    TrackingMode.BreakdownBuy -> TrackingPhase.Phase1_Low_Set
+                    TrackingMode.BreakoutSell -> TrackingPhase.Phase1_High_Set
+                    else -> TrackingPhase.Idle
+                },
+                conditionParams = ConditionParams(
+                    lowPrice = lowPrice,
+                    highPrice = highPrice,
+                    reboundTicks = reboundTicks,
+                    retraceTicks = retraceTicks,
+                    stopLossPct = stopLossPct,
+                    quantity = quantity,
+                    tickSize = tickSize
+                )
+            )
+        }
+    }
+
+    /**
+     * 取消條件單追蹤（用戶點擊「取消追蹤」按鈕時呼叫）
+     */
+    fun cancelTracking() {
+        _uiState.update {
+            it.copy(
+                trackingPhase = TrackingPhase.Idle,
+                trackingMode = TrackingMode.None,
+                conditionParams = null
+            )
+        }
+    }
+
+    /**
+     * 用另一個按鈕平倉（BreakdownBuy 建倉 → 用 breakoutSell 平倉；反之亦然）
+     */
+    fun closeWithOppositeButton() {
+        val state = _uiState.value
+        val params = state.conditionParams ?: return
+        val positions = state.dayTradePositions
+        if (positions.isEmpty()) return
+
+        val pos = positions.first()
+        val oppositeBuySell = if (pos.direction == BuySell.Buy) BuySell.Sell else BuySell.Buy
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isOrderLoading = true) }
+            try {
+                val result = repository.placeStockOrder(
+                    accountId = state.currentAccount!!.accountId,
+                    symbol = pos.symbol,
+                    price = state.currentQuote?.price ?: pos.currentPrice,
+                    quantity = pos.quantity,
+                    buySell = oppositeBuySell.name
+                )
+                result.fold(
+                    onSuccess = {
+                        _uiState.update {
+                            it.copy(
+                                isOrderLoading = false,
+                                orderMessage = "反向平倉成功",
+                                trackingPhase = TrackingPhase.Idle,
+                                trackingMode = TrackingMode.None,
+                                conditionParams = null
+                            )
+                        }
+                        refreshDayTradePositions()
+                    },
+                    onFailure = { e ->
+                        _uiState.update {
+                            it.copy(isOrderLoading = false, errorMessage = e.message)
+                        }
+                    }
+                )
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(isOrderLoading = false, errorMessage = e.message)
+                }
+            }
+        }
+    }
+
+    /**
+     * 收到新報價時驅動條件引擎（由 WebSocket quotes flow 觀察者呼叫）
+     */
+    fun onQuoteUpdate(price: Double, tickSize: Double) {
+        val state = _uiState.value
+        if (state.trackingPhase == TrackingPhase.Idle) return
+        if (state.conditionParams == null) return
+
+        val params = state.conditionParams
+        val mode = state.trackingMode
+
+        when (state.trackingPhase) {
+            TrackingPhase.Phase1_Low_Set -> {
+                if (mode == TrackingMode.BreakdownBuy && price <= (params.lowPrice ?: return)) {
+                    _uiState.update { it.copy(trackingPhase = TrackingPhase.Phase2_Rebound) }
+                }
+            }
+            TrackingPhase.Phase1_High_Set -> {
+                if (mode == TrackingMode.BreakoutSell && price >= (params.highPrice ?: return)) {
+                    _uiState.update { it.copy(trackingPhase = TrackingPhase.Phase2_Retrace) }
+                }
+            }
+            TrackingPhase.Phase2_Rebound -> {
+                if (mode != TrackingMode.BreakdownBuy) return
+                val triggerPrice = params.lowPrice ?: return
+                val reboundSize = params.reboundTicks * tickSize
+                val reboundPrice = triggerPrice + reboundSize
+                if (price >= reboundPrice) {
+                    placeMarketEntry(
+                        symbol = state.quoteSymbol,
+                        side = "buy",
+                        quantity = params.quantity,
+                        stopLossPct = params.stopLossPct
+                    )
+                }
+            }
+            TrackingPhase.Phase2_Retrace -> {
+                if (mode != TrackingMode.BreakoutSell) return
+                val triggerPrice = params.highPrice ?: return
+                val retraceSize = params.retraceTicks * tickSize
+                val retracePrice = triggerPrice - retraceSize
+                if (price <= retracePrice) {
+                    placeMarketEntry(
+                        symbol = state.quoteSymbol,
+                        side = "sell",
+                        quantity = params.quantity,
+                        stopLossPct = params.stopLossPct
+                    )
+                }
+            }
+            else -> {}
+        }
+    }
+
+    private fun placeMarketEntry(symbol: String, side: String, quantity: Int, stopLossPct: Double) {
+        viewModelScope.launch {
+            val account = _uiState.value.currentAccount ?: return@launch
+            _uiState.update { it.copy(isOrderLoading = true) }
+
+            try {
+                val buySell = if (side == "buy") BuySell.Buy else BuySell.Sell
+                val result = repository.placeDayTradeEntry(
+                    accountId = account.accountId,
+                    symbol = symbol,
+                    entryMode = if (side == "buy") "breakdown_buy" else "breakout_sell",
+                    price = _uiState.value.currentQuote?.price ?: 0.0,
+                    quantity = quantity
+                )
+                result.fold(
+                    onSuccess = {
+                        _uiState.update {
+                            it.copy(
+                                isOrderLoading = false,
+                                orderMessage = "✅ 條件單觸發進場成功",
+                                trackingPhase = TrackingPhase.Idle,
+                                trackingMode = TrackingMode.None,
+                                conditionParams = null
+                            )
+                        }
+                        refreshDayTradePositions()
+                    },
+                    onFailure = { e ->
+                        _uiState.update {
+                            it.copy(isOrderLoading = false, errorMessage = "條件單觸發失敗: ${e.message}")
+                        }
+                    }
+                )
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(isOrderLoading = false, errorMessage = e.message)
+                }
+            }
+        }
     }
 }

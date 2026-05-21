@@ -57,6 +57,9 @@ import com.fubon.daytrade.ui.theme.StockUp
 import com.fubon.daytrade.ui.viewmodel.AutoSquareStatus
 import com.fubon.daytrade.ui.viewmodel.DayTradePosition
 import com.fubon.daytrade.ui.viewmodel.DayTradeViewModel
+import com.fubon.daytrade.ui.viewmodel.TrackingPhase
+import com.fubon.daytrade.ui.viewmodel.TrackingMode
+import com.fubon.daytrade.ui.viewmodel.ConditionParams
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -121,6 +124,10 @@ fun DayTradeScreen(
                 OrderPanel(
                     currentPrice = uiState.currentQuote?.price,
                     isLoading = uiState.isOrderLoading,
+                    trackingPhase = uiState.trackingPhase,
+                    trackingMode = uiState.trackingMode,
+                    conditionParams = uiState.conditionParams,
+                    hasPosition = uiState.dayTradePositions.isNotEmpty(),
                     onBuy = { price, quantity ->
                         viewModel.placeDayTradeBuy(uiState.quoteSymbol, price, quantity)
                     },
@@ -132,7 +139,33 @@ fun DayTradeScreen(
                     trackLevels = uiState.trackLevels,
                     onTrackLevelsChange = { viewModel.setTrackLevels(it) },
                     stopLossPct = uiState.stopLossPct,
-                    onStopLossPctChange = { viewModel.setStopLossPct(it) }
+                    onStopLossPctChange = { viewModel.setStopLossPct(it) },
+                    onStartBreakdownBuy = { lowPrice, reboundTicks, stopLossPct, quantity ->
+                        viewModel.startTracking(
+                            mode = TrackingMode.BreakdownBuy,
+                            lowPrice = lowPrice,
+                            highPrice = null,
+                            reboundTicks = reboundTicks,
+                            retraceTicks = 5,
+                            stopLossPct = stopLossPct.toDouble(),
+                            quantity = quantity,
+                            tickSize = 0.01  // 股票最小跳動 0.01 元
+                        )
+                    },
+                    onStartBreakoutSell = { highPrice, retraceTicks, stopLossPct, quantity ->
+                        viewModel.startTracking(
+                            mode = TrackingMode.BreakoutSell,
+                            lowPrice = null,
+                            highPrice = highPrice,
+                            reboundTicks = 5,
+                            retraceTicks = retraceTicks,
+                            stopLossPct = stopLossPct.toDouble(),
+                            quantity = quantity,
+                            tickSize = 0.01
+                        )
+                    },
+                    onCancel = { viewModel.cancelTracking() },
+                    onClosePosition = { viewModel.closeWithOppositeButton() }
                 )
             }
         }

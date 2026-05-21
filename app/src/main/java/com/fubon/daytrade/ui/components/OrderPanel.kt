@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
@@ -33,11 +34,13 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -45,6 +48,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.fubon.daytrade.ui.theme.LimitDownBlue
 import com.fubon.daytrade.ui.theme.LimitUpRed
+import com.fubon.daytrade.ui.theme.StockDown
+import com.fubon.daytrade.ui.theme.StockFlat
+import com.fubon.daytrade.ui.theme.StockUp
+import com.fubon.daytrade.ui.viewmodel.ConditionParams
+import com.fubon.daytrade.ui.viewmodel.TrackingMode
+import com.fubon.daytrade.ui.viewmodel.TrackingPhase
 
 // ══════════════════════════════════════════════════════════════
 // 雙模式 entry mode 常數
@@ -69,14 +78,31 @@ fun OrderPanel(
     onTrackLevelsChange: ((Int) -> Unit)? = null,
     stopLossPct: Float? = null,
     onStopLossPctChange: ((Float) -> Unit)? = null,
+    // 條件單追蹤參數（可選）
+    trackingPhase: TrackingPhase? = null,
+    trackingMode: TrackingMode? = null,
+    conditionParams: ConditionParams? = null,
+    hasPosition: Boolean = false,
+    onStartBreakdownBuy: ((lowPrice: Double, reboundTicks: Int, stopLossPct: Float, quantity: Int) -> Unit)? = null,
+    onStartBreakoutSell: ((highPrice: Double, retraceTicks: Int, stopLossPct: Float, quantity: Int) -> Unit)? = null,
+    onCancel: (() -> Unit)? = null,
+    onClosePosition: (() -> Unit)? = null,
 ) {
+    // 股票最小跳動為 0.01 元（證券）
+    val tickSize = 0.01
     var priceText by remember { mutableStateOf(currentPrice?.toString() ?: "") }
     var quantityText by remember { mutableStateOf("") }
+    var lowPriceText by remember { mutableStateOf("") }
+    var highPriceText by remember { mutableStateOf("") }
+    var reboundTicks by remember { mutableIntStateOf(5) }
+    var retraceTicks by remember { mutableIntStateOf(5) }
 
     // Update price when currentPrice changes
     if (currentPrice != null && priceText.isEmpty()) {
         priceText = currentPrice.toString()
     }
+
+    val isTracking = trackingPhase != null && trackingPhase != TrackingPhase.Idle
 
     Card(
         modifier = modifier.fillMaxWidth(),
@@ -205,19 +231,82 @@ fun OrderPanel(
                 }
             }
 
-            // Quick quantity buttons
-            Spacer(modifier = Modifier.height(12.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                listOf(1, 5, 10, 20).forEach { qty ->
-                    QuickQuantityButton(
-                        quantity = qty,
-                        onClick = { quantityText = qty.toString() },
-                        enabled = !isLoading,
-                        modifier = Modifier.weight(1f)
-                    )
+            // ════════════════════════════════════════════════════════════
+            // 階段 2：條件追蹤中（Phase1 / Phase2）
+            // ════════════════════════════════════════════════════
+            if (isTracking) {
+                // 追蹤中的說明
+                val (phaseText, phaseColor) = when (trackingPhase) {
+                    TrackingPhase.Phase1_Low_Set ->
+                        "📡 等待跌破低點 ${conditionParams?.lowPrice ?: "?"}..." to LimitUpRed
+                    TrackingPhase.Phase1_High_Set ->
+                        "📡 等待突破高點 ${conditionParams?.highPrice ?: "?"}..." to LimitDownBlue
+                    TrackingPhase.Phase2_Rebound ->
+                        "📈 已跌破！等反彈 ${conditionParams?.reboundTicks ?: 5} 檔" to StockUp
+                    TrackingPhase.Phase2_Retrace ->
+                        "📉 已突破！等回檔 ${conditionParams?.retraceTicks ?: 5} 檔" to StockDown
+                    else -> "" to MaterialTheme.colorScheme.onSurface
+                }
+
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = phaseColor.copy(alpha = 0.1f)),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(phaseColor))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(text = phaseText, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium, color = phaseColor)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // 兩顆按鈕：取消 + 平倉
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Button(
+                        onClick = { onCancel?.invoke() },
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary),
+                        shape = RoundedCornerShape(8.dp),
+                        enabled = !isLoading
+                    ) {
+                        Text(text = "❌ 取消追蹤", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    }
+
+                    Button(
+                        onClick = { onClosePosition?.invoke() },
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (trackingMode == TrackingMode.BreakdownBuy) LimitDownBlue else LimitUpRed
+                        ),
+                        shape = RoundedCornerShape(8.dp),
+                        enabled = !isLoading && hasPosition
+                    ) {
+                        Text(text = if (hasPosition) "平倉" else "等待建倉...", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    }
+                }
+            } else {
+                // Quick quantity buttons
+                Spacer(modifier = Modifier.height(12.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    listOf(1, 5, 10, 20).forEach { qty ->
+                        QuickQuantityButton(
+                            quantity = qty,
+                            onClick = { quantityText = qty.toString() },
+                            enabled = !isLoading,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
                 }
             }
         }

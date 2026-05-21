@@ -140,24 +140,36 @@ fun FuturesScreen(
                 FuturesOrderPanel(
                     tick = tick,
                     isLoading = uiState.isOrderLoading,
-                    onBreakdownBuy = { price, qty, stopLossPct, trackLevels ->
-                        viewModel.placeBreakdownBuy(
-                            symbol = tick.symbol,
-                            price = price,
-                            quantity = qty,
+                    trackingPhase = uiState.trackingPhase,
+                    trackingMode = uiState.trackingMode,
+                    conditionParams = uiState.conditionParams,
+                    hasPosition = uiState.futuresPositions.isNotEmpty(),
+                    onStartBreakdownBuy = { lowPrice, reboundTicks, stopLossPct, quantity ->
+                        viewModel.startTracking(
+                            mode = com.fubon.daytrade.ui.viewmodel.TrackingMode.BreakdownBuy,
+                            lowPrice = lowPrice,
+                            highPrice = null,
+                            reboundTicks = reboundTicks,
+                            retraceTicks = 5,
                             stopLossPct = stopLossPct,
-                            trackLevels = trackLevels
+                            quantity = quantity,
+                            tickSize = tick.tickSize
                         )
                     },
-                    onBreakoutSell = { price, qty, stopLossPct, trackLevels ->
-                        viewModel.placeBreakoutSell(
-                            symbol = tick.symbol,
-                            price = price,
-                            quantity = qty,
+                    onStartBreakoutSell = { highPrice, retraceTicks, stopLossPct, quantity ->
+                        viewModel.startTracking(
+                            mode = com.fubon.daytrade.ui.viewmodel.TrackingMode.BreakoutSell,
+                            lowPrice = null,
+                            highPrice = highPrice,
+                            reboundTicks = 5,
+                            retraceTicks = retraceTicks,
                             stopLossPct = stopLossPct,
-                            trackLevels = trackLevels
+                            quantity = quantity,
+                            tickSize = tick.tickSize
                         )
-                    }
+                    },
+                    onCancel = { viewModel.cancelTracking() },
+                    onClosePosition = { viewModel.closeWithOppositeButton() }
                 )
             }
         }
@@ -639,13 +651,27 @@ private fun FuturesQuoteCard(
 private fun FuturesOrderPanel(
     tick: com.fubon.daytrade.ui.viewmodel.FuturesTick,
     isLoading: Boolean,
-    onBreakdownBuy: (price: Double?, qty: Int, stopLossPct: Double, trackLevels: Int) -> Unit,
-    onBreakoutSell: (price: Double?, qty: Int, stopLossPct: Double, trackLevels: Int) -> Unit
+    trackingPhase: com.fubon.daytrade.ui.viewmodel.TrackingPhase,
+    trackingMode: com.fubon.daytrade.ui.viewmodel.TrackingMode,
+    conditionParams: com.fubon.daytrade.ui.viewmodel.ConditionParams?,
+    hasPosition: Boolean,
+    onStartBreakdownBuy: (lowPrice: Double, reboundTicks: Int, stopLossPct: Double, quantity: Int) -> Unit,
+    onStartBreakoutSell: (highPrice: Double, retraceTicks: Int, stopLossPct: Double, quantity: Int) -> Unit,
+    onCancel: () -> Unit,
+    onClosePosition: () -> Unit
 ) {
-    var selectedMode by remember { mutableStateOf(0) }  // 0=breakdown_buy, 1=breakout_sell
+    // 輸入欄位
+    var lowPriceText by remember { mutableStateOf("") }
+    var highPriceText by remember { mutableStateOf("") }
     var quantityText by remember { mutableStateOf("1") }
     var stopLossText by remember { mutableStateOf("2.0") }
-    var trackLevels by remember { mutableIntStateOf(1) }
+    var reboundTicks by remember { mutableIntStateOf(5) }
+    var retraceTicks by remember { mutableIntStateOf(5) }
+
+    // 是否正在追蹤
+    val isTracking = trackingPhase != com.fubon.daytrade.ui.viewmodel.TrackingPhase.Idle
+    val isBreakdownMode = trackingMode == com.fubon.daytrade.ui.viewmodel.TrackingMode.BreakdownBuy
+    val isBreakoutMode = trackingMode == com.fubon.daytrade.ui.viewmodel.TrackingMode.BreakoutSell
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -659,127 +685,255 @@ private fun FuturesOrderPanel(
             modifier = Modifier.padding(16.dp)
         ) {
             Text(
-                text = "期貨條件下單",
+                text = "條件下單",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold
             )
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // 進場模式選擇（breakdown_buy / breakout_sell）
-            SingleChoiceSegmentedButtonRow(
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                SegmentedButton(
-                    selected = selectedMode == 0,
-                    onClick = { selectedMode = 0 },
-                    shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
-                    label = { Text("追低點買入（做多）") }
+            // ════════════════════════════════════════════════════
+            // 階段 1：等待條件設定（Idle 狀態）
+            // ════════════════════════════════════════════════════
+            if (trackingPhase == com.fubon.daytrade.ui.viewmodel.TrackingPhase.Idle) {
+                // 進場模式選擇
+                var selectedMode by remember { mutableIntStateOf(0) }
+
+                SingleChoiceSegmentedButtonRow(
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    SegmentedButton(
+                        selected = selectedMode == 0,
+                        onClick = { selectedMode = 0 },
+                        shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
+                        label = { Text("追低點買入") }
+                    )
+                    SegmentedButton(
+                        selected = selectedMode == 1,
+                        onClick = { selectedMode = 1 },
+                        shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
+                        label = { Text("追高點回檔") }
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // 模式說明
+                val modeDescription = if (selectedMode == 0) {
+                    "現價 ${tick.lastPrice.toInt()} → 設定低點，跌破後等反彈 N 檔買進"
+                } else {
+                    "現價 ${tick.lastPrice.toInt()} → 設定高點，突破後等回檔 N 檔賣出"
+                }
+                Text(
+                    text = modeDescription,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                SegmentedButton(
-                    selected = selectedMode == 1,
-                    onClick = { selectedMode = 1 },
-                    shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
-                    label = { Text("追高點回檔（做空）") }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // 低點/高點輸入
+                if (selectedMode == 0) {
+                    OutlinedTextField(
+                        value = lowPriceText,
+                        onValueChange = { lowPriceText = it.filter { c -> c.isDigit() || c == '.' } },
+                        label = { Text("低點價（跌破此價後等反彈）") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        suffix = { Text("點") }
+                    )
+                } else {
+                    OutlinedTextField(
+                        value = highPriceText,
+                        onValueChange = { highPriceText = it.filter { c -> c.isDigit() || c == '.' } },
+                        label = { Text("高點價（突破此價後等回檔）") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        suffix = { Text("點") }
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // 追蹤檔位（反彈/回檔）
+                val trackLabel = if (selectedMode == 0) "反彈檔位" else "回檔檔位"
+                val trackValue = if (selectedMode == 0) reboundTicks else retraceTicks
+                val onTrackChange: (Int) -> Unit = { newVal ->
+                    if (selectedMode == 0) reboundTicks = newVal else retraceTicks = newVal
+                }
+
+                Text(
+                    text = trackLabel,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // 說明文字
-            val modeDescription = if (selectedMode == 0) {
-                "等低點出現後，價格反彈 N 檔市價買進 → 看對方向時高點附近賣出"
-            } else {
-                "等高點出現後，價格回檔 N 檔市價放空 → 看對方向時低點附近回補"
-            }
-            Text(
-                text = modeDescription,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // 停損設定
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                OutlinedTextField(
-                    value = stopLossText,
-                    onValueChange = { stopLossText = it.filter { c -> c.isDigit() || c == '.' } },
-                    label = { Text("停損%") },
-                    modifier = Modifier.weight(1f),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    singleLine = true,
-                    suffix = { Text("%") }
-                )
-                OutlinedTextField(
-                    value = quantityText,
-                    onValueChange = { quantityText = it.filter { c -> c.isDigit() } },
-                    label = { Text("口數") },
-                    modifier = Modifier.weight(1f),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    singleLine = true
-                )
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // 追蹤檔位選擇
-            Text(
-                text = "追蹤檔位（1=積極冒險，5=保守）",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                (1..5).forEach { level ->
-                    FilterChip(
-                        selected = trackLevels == level,
-                        onClick = { trackLevels = level },
-                        label = { Text("${level}檔") },
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = MaterialTheme.colorScheme.primary,
-                            selectedLabelColor = MaterialTheme.colorScheme.onPrimary
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    (1..10).forEach { level ->
+                        FilterChip(
+                            selected = trackValue == level,
+                            onClick = { onTrackChange(level) },
+                            label = { Text("${level}檔") },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = MaterialTheme.colorScheme.primary,
+                                selectedLabelColor = MaterialTheme.colorScheme.onPrimary
+                            )
                         )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // 停損 + 口數
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedTextField(
+                        value = stopLossText,
+                        onValueChange = { stopLossText = it.filter { c -> c.isDigit() || c == '.' } },
+                        label = { Text("停損%") },
+                        modifier = Modifier.weight(1f),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        singleLine = true,
+                        suffix = { Text("%") }
+                    )
+                    OutlinedTextField(
+                        value = quantityText,
+                        onValueChange = { quantityText = it.filter { c -> c.isDigit() } },
+                        label = { Text("口數") },
+                        modifier = Modifier.weight(1f),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        singleLine = true
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // 執行按鈕（按 A 或 B）
+                val isBreakdownBuy = selectedMode == 0
+                val buttonText = if (isBreakdownBuy) "🔴 執行買入（追低點）" else "🔵 執行賣出（追高點）"
+                val buttonColor = if (isBreakdownBuy) LimitUpRed else LimitDownBlue
+
+                androidx.compose.material3.Button(
+                    onClick = {
+                        val qty = quantityText.toIntOrNull() ?: 1
+                        val stopLoss = stopLossText.toDoubleOrNull() ?: 2.0
+                        if (isBreakdownBuy) {
+                            val low = lowPriceText.toDoubleOrNull() ?: return@Button
+                            onStartBreakdownBuy(low, reboundTicks, stopLoss, qty)
+                        } else {
+                            val high = highPriceText.toDoubleOrNull() ?: return@Button
+                            onStartBreakoutSell(high, retraceTicks, stopLoss, qty)
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !isLoading && quantityText.isNotEmpty(),
+                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                        containerColor = buttonColor
+                    ),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text(
+                        text = if (isLoading) "處理中..." else buttonText,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
                     )
                 }
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            // ════════════════════════════════════════════════════
+            // 階段 2：條件追蹤中（Phase1 / Phase2）
+            // ════════════════════════════════════════════════════
+            else {
+                // 追蹤中的說明
+                val (phaseText, phaseColor) = when (trackingPhase) {
+                    com.fubon.daytrade.ui.viewmodel.TrackingPhase.Phase1_Low_Set ->
+                        "📡 等待跌破低點 ${conditionParams?.lowPrice?.toInt() ?: "?"}..." to LimitUpRed
+                    com.fubon.daytrade.ui.viewmodel.TrackingPhase.Phase1_High_Set ->
+                        "📡 等待突破高點 ${conditionParams?.highPrice?.toInt() ?: "?"}..." to LimitDownBlue
+                    com.fubon.daytrade.ui.viewmodel.TrackingPhase.Phase2_Rebound ->
+                        "📈 已跌破！等反彈 ${conditionParams?.reboundTicks ?: 5} 檔（目標 ${conditionParams?.let { (it.lowPrice ?: 0.0) + (it.reboundTicks * it.tickSize).toInt() }}）" to StockUp
+                    com.fubon.daytrade.ui.viewmodel.TrackingPhase.Phase2_Retrace ->
+                        "📉 已突破！等回檔 ${conditionParams?.retraceTicks ?: 5} 檔（目標 ${conditionParams?.let { (it.highPrice ?: 0.0) - (it.retraceTicks * it.tickSize).toInt() }}）" to StockDown
+                    else -> "" to MaterialTheme.colorScheme.onSurface
+                }
 
-            // 執行按鈕
-            val isBreakdownBuy = selectedMode == 0
-            val buttonText = if (isBreakdownBuy) "執行買入（追低點）" else "執行賣出（追高點）"
-            val buttonColor = if (isBreakdownBuy) LimitUpRed else LimitDownBlue
-
-            androidx.compose.material3.Button(
-                onClick = {
-                    val qty = quantityText.toIntOrNull() ?: 1
-                    val stopLossPct = stopLossText.toDoubleOrNull() ?: 2.0
-                    if (isBreakdownBuy) {
-                        onBreakdownBuy(null, qty, stopLossPct, trackLevels)
-                    } else {
-                        onBreakoutSell(null, qty, stopLossPct, trackLevels)
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = phaseColor.copy(alpha = 0.1f)
+                    ),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(phaseColor)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = phaseText,
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium,
+                            color = phaseColor
+                        )
                     }
-                },
-                modifier = Modifier.fillMaxWidth(),
-                enabled = !isLoading && quantityText.isNotEmpty(),
-                colors = androidx.compose.material3.ButtonDefaults.buttonColors(
-                    containerColor = buttonColor
-                ),
-                shape = RoundedCornerShape(8.dp)
-            ) {
-                Text(
-                    text = if (isLoading) "處理中..." else buttonText,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(vertical = 8.dp)
-                )
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // 兩顆按鈕：主動側 = 取消，另一側 = 平倉（如果已有持倉）
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    // 主動側按鈕（取消追蹤）
+                    androidx.compose.material3.Button(
+                        onClick = onCancel,
+                        modifier = Modifier.weight(1f),
+                        colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.secondary
+                        ),
+                        shape = RoundedCornerShape(8.dp),
+                        enabled = !isLoading
+                    ) {
+                        Text(
+                            text = "❌ 取消追蹤",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    // 另一側按鈕：如果有持倉就顯示平倉，否則禁用
+                    androidx.compose.material3.Button(
+                        onClick = onClosePosition,
+                        modifier = Modifier.weight(1f),
+                        colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                            containerColor = if (isBreakdownMode) LimitDownBlue else LimitUpRed
+                        ),
+                        shape = RoundedCornerShape(8.dp),
+                        enabled = !isLoading && hasPosition
+                    ) {
+                        Text(
+                            text = if (hasPosition) "平倉" else "等待建倉...",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
             }
         }
     }
