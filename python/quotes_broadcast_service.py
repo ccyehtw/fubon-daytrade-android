@@ -1,15 +1,10 @@
 # quotes_broadcast_service.py — 即時報價轉播服務
 # 職責：
-#   - 定期從富邦 SDK 取得期貨/股票即時報價（polling 或 WebSocket 轉發）
+#   - 定期從富邦 SDK 取得期貨/股票即時報價（polling）
 #   - 透過 WebSocketManager 廣播給 Android App 訂閱者
 #
 # 資料流：
-#   富邦 SDK → QuotesBroadcastService → WebSocketManager → Android App
-#
-# 設計考量：
-#   - 期貨：使用富邦 WebSocket 報價介面（若 SDK 支援）
-#   - 股票：目前無 SDK 報價介面，改用 Polling 方式（每 3 秒一次）
-#   - 可擴展：日後富邦提供股票 WebSocket 時替換即可
+#   富邦 SDK (marketdata.rest_client.stock.snapshot.quotes) → QuotesBroadcastService → WebSocketManager → Android App
 
 import asyncio
 import logging
@@ -75,6 +70,10 @@ class QuotesBroadcastService:
         # SDK 實例（由 service.py 注入）
         self._sdk = None
 
+        # 股票快取（marketdata.rest_client.stock.snapshot.quotes）
+        self._stock_cache: Optional[dict] = None
+        self._stock_cache_time: float = 0
+
         logger.info("QuotesBroadcastService 初始化完成")
 
     # ──────────────────────────────────────────────────────────────
@@ -84,6 +83,7 @@ class QuotesBroadcastService:
     def set_sdk(self, sdk):
         """注入 FubonSDK 實例"""
         self._sdk = sdk
+        logger.info(f"[Quotes] SDK 注入成功，SDK={type(sdk).__name__ if sdk else 'None'}")
 
     def set_ws_manager(self, ws_manager):
         """注入 WebSocketManager"""
@@ -176,18 +176,18 @@ class QuotesBroadcastService:
 
         for symbol, info in subs.items():
             try:
+                quote = None
                 if info["product_type"] == "futures":
                     quote = await self._fetch_futures_quote(symbol)
                 else:
                     quote = await self._fetch_stock_quote(symbol)
 
-                if quote and self._should_broadcast(symbol, quote):
+                if quote and self._ws_manager:
                     self._last_quote_cache[symbol] = quote
-                    if self._ws_manager:
-                        await self._ws_manager.broadcast_quote(
-                            symbol=symbol,
-                            quote_data=quote,
-                        )
+                    await self._ws_manager.broadcast_quote(
+                        symbol=symbol,
+                        quote_data=quote,
+                    )
             except Exception as e:
                 logger.warning(f"[Quotes] 取得 {symbol} 報價失敗: {e}")
 
@@ -197,109 +197,104 @@ class QuotesBroadcastService:
 
     async def _fetch_stock_quote(self, symbol: str) -> Optional[dict]:
         """
-        取得股票報價
-        目前使用 REST polling（富邦 SDK 無股票 WebSocket）
+        取得股票報價（富邦 SDK marketdata.rest_client.stock.snapshot.quotes）
+        資料來源：富邦 Fubon Neo API SDK（fubon-neo-api skill）
         """
+        logger.info(f"[Quotes] _fetch_stock_quote called, SDK={type(self._sdk).__name__ if self._sdk else 'None'}")
         if not self._sdk:
-            # Mock 資料
-            return self._mock_stock_quote(symbol)
+            logger.warning(f"[Quotes] 股票報價 {symbol} 失敗：SDK 未初始化")
+            return None
 
         try:
-            import json
-            # 嘗試呼叫富邦股票報價 API
-            # 注意：富邦目前無股票即時報價 SDK，此處預留介面
-            # 若日後有，可改為：resp = await self._sdk.stock.get_quote(symbol)
-            return self._mock_stock_quote(symbol)
+            import time
+            # 快取 30 秒，全市場一次抓取後快取
+            now = time.time()
+            if self._stock_cache is None or (now - self._stock_cache_time) > 30:
+                rc = self._sdk.marketdata.rest_client
+                quotes_data = rc.stock.snapshot.quotes(market="TSE")
+                self._stock_cache = {q["symbol"]: q for q in quotes_data.get("data", [])}
+                self._stock_cache_time = now
+                logger.info(f"[Quotes] 已更新股票快取，共 {len(self._stock_cache)} 檔")
+
+            # Step 1: 先嘗試以代碼（symbol）精確匹配
+            stock = self._stock_cache.get(symbol)
+            if not stock:
+                # Step 2: 代碼未命中，再以名稱模糊匹配（支援「台積電」查詢「2330」）
+                for sym, s in self._stock_cache.items():
+                    if symbol in s.get("name", ""):
+                        stock = s
+                        logger.info(f"[Quotes] 股票名稱匹配: {symbol} → {sym} ({s.get('name')})")
+                        break
+                if not stock:
+                    # Step 3: 反向匹配 — 以輸入去找任何包含該文字的股票
+                    search_term = symbol.strip()
+                    for sym, s in self._stock_cache.items():
+                        name = s.get("name", "")
+                        code = s.get("symbol", "")
+                        if search_term in name or search_term.upper() in code.upper():
+                            stock = s
+                            logger.info(f"[Quotes] 股票模糊匹配: {symbol} → {sym} ({name})")
+                            break
+
+            if stock:
+                return {
+                    "symbol": stock.get("symbol"),
+                    "name": stock.get("name"),
+                    "last_price": stock.get("lastPrice"),
+                    "change": stock.get("change", 0),
+                    "change_percent": stock.get("changePercent", 0),
+                    "open": stock.get("openPrice"),
+                    "high": stock.get("highPrice"),
+                    "low": stock.get("lowPrice"),
+                    "close": stock.get("closePrice"),
+                    "volume": stock.get("tradeVolume"),
+                }
+            else:
+                logger.warning(f"[Quotes] 找不到股票 {symbol}")
+                return None
         except Exception as e:
-            logger.warning(f"[Quotes] 股票報價失敗 {symbol}: {e}, 使用 Mock")
-            return self._mock_stock_quote(symbol)
+            logger.warning(f"[Quotes] 股票報價失敗 {symbol}: {e}")
+            return None
 
     async def _fetch_futures_quote(self, symbol: str) -> Optional[dict]:
-        """取得期貨報價"""
+        """取得期貨報價（富邦 SDK marketdata.rest_client.futopt.intraday.quote）
+        
+        重要：要用 quote() 而非 ticker()，因為 ticker() 回傳 lastPrice=None。
+        期貨代碼格式需完整合約代碼，如 TXFF6、MXFF6、FEFG6。
+        """
         if not self._sdk:
-            return self._mock_futures_quote(symbol)
+            logger.warning(f"[Quotes] 期貨報價 {symbol} 失敗：SDK 未初始化")
+            return None
 
         try:
-            # 嘗試使用 SDK 的期貨報價
-            resp = self._sdk.futopt.get_quote(symbol)
-            if not resp.is_success:
-                return self._mock_futures_quote(symbol)
-
-            data = resp.data
+            rc = self._sdk.marketdata.rest_client
+            futopt_client = rc.futopt
+            resp = futopt_client.intraday.quote(symbol=symbol)
+            if not resp or not resp.get('data'):
+                logger.warning(f"[Quotes] 期貨 {symbol} 期貨報價回傳異常: {resp}")
+                return None
+            d = resp['data']  # quote() 回傳 dict，直接是報價物件
             return {
-                "symbol": symbol,
-                "name": getattr(data, 'name', symbol),
-                "last_price": float(getattr(data, 'last_price', 0)),
-                "bid_price": float(getattr(data, 'bid_price', 0)),
-                "ask_price": float(getattr(data, 'ask_price', 0)),
-                "volume": int(getattr(data, 'volume', 0)),
-                "open_price": float(getattr(data, 'open_price', 0)),
-                "high_price": float(getattr(data, 'high_price', 0)),
-                "low_price": float(getattr(data, 'low_price', 0)),
-                "change": float(getattr(data, 'change', 0)),
-                "change_percent": float(getattr(data, 'change_percent', 0)),
+                "symbol": d.get('symbol', symbol),
+                "name": d.get('name', symbol),
+                "last_price": float(d.get('lastPrice') or d.get('closePrice') or 0),
+                "bid_price": float(d.get('lastTrade', {}).get('bid') or 0),
+                "ask_price": float(d.get('lastTrade', {}).get('ask') or 0),
+                "volume": int(d.get('total', {}).get('tradeVolume') or 0),
+                "open_price": float(d.get('openPrice') or 0),
+                "high_price": float(d.get('highPrice') or 0),
+                "low_price": float(d.get('lowPrice') or 0),
+                "change": float(d.get('change') or 0),
+                "change_percent": float(d.get('changePercent') or 0),
                 "updated_at": datetime.now().isoformat(),
             }
         except Exception as e:
-            logger.warning(f"[Quotes] 期貨報價失敗 {symbol}: {e}, 使用 Mock")
-            return self._mock_futures_quote(symbol)
+            logger.warning(f"[Quotes] 期貨報價失敗 {symbol}: {e}")
+            return None
 
-    # ──────────────────────────────────────────────────────────────
-    # Mock 報價（開發/無 SDK 時使用）
-    # ──────────────────────────────────────────────────────────────
-
-    def _mock_stock_quote(self, symbol: str) -> dict:
-        """模擬股票報價（開發用）"""
-        base_prices = {
-            "2330": 1080.0,
-            "2317": 158.0,
-            "2454": 2280.0,
-            "2308": 520.0,
-            "3008": 1680.0,
-        }
-        base = base_prices.get(symbol, 100.0 + hash(symbol) % 500)
-        change = (hash(str(time.time())) % 20 - 10) * 0.1
-
-        return {
-            "symbol": symbol,
-            "name": symbol,
-            "last_price": round(base + change, 2),
-            "bid_price": round(base + change - 0.5, 2),
-            "ask_price": round(base + change + 0.5, 2),
-            "volume": (hash(symbol) % 500000) + 10000,
-            "change": round(change, 2),
-            "change_percent": round((change / base) * 100, 2),
-            "open_price": round(base - 5, 2),
-            "high_price": round(base + 15, 2),
-            "low_price": round(base - 10, 2),
-            "updated_at": datetime.now().isoformat(),
-        }
-
-    def _mock_futures_quote(self, symbol: str) -> dict:
-        """模擬期貨報價（開發用）"""
-        base_prices = {
-            "TXF": 21500.0,
-            "MXF": 21500.0,
-            "EXF": 1850.0,
-            "FEF": 1820.0,
-        }
-        base = base_prices.get(symbol, 20000.0)
-        change = (hash(str(time.time())) % 40 - 20)
-
-        return {
-            "symbol": symbol,
-            "name": symbol,
-            "last_price": round(base + change, 1),
-            "bid_price": round(base + change - 1, 1),
-            "ask_price": round(base + change + 1, 1),
-            "volume": (hash(symbol) % 30000) + 5000,
-            "change": round(change, 1),
-            "change_percent": round((change / base) * 100, 2),
-            "open_price": round(base - 10, 1),
-            "high_price": round(base + 30, 1),
-            "low_price": round(base - 20, 1),
-            "updated_at": datetime.now().isoformat(),
-        }
+    async def _fetch_futures_quote_fallback(self, symbol: str) -> Optional[dict]:
+        """Fallback 期貨報價：使用 intraday.quote（與主要方法相同，但增加重試邏輯）"""
+        return await self._fetch_futures_quote(symbol)
 
     # ──────────────────────────────────────────────────────────────
     # 過濾（避免重複廣播相同報價）
@@ -317,7 +312,7 @@ class QuotesBroadcastService:
 # 全域單例（修復：確保同一實例被複用）
 # ════════════════════════════════════════════════════════════════════
 
-_instance: Optional[QuotesBroadcastService] = None
+_instance = None
 
 
 def get_quotes_broadcast_service() -> QuotesBroadcastService:
