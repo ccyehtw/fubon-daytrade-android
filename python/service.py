@@ -11,7 +11,10 @@ import os
 from dataclasses import dataclass, asdict
 from typing import Optional, List, Dict, Any
 
-from fastapi import FastAPI, HTTPException, Request, WebSocket, Header, Depends
+from dotenv import load_dotenv
+load_dotenv(os.path.join(os.path.dirname(__file__), '.env'))
+
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, Header, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -36,7 +39,7 @@ app = FastAPI(title="Fubon DayTrade Service", version="1.1.0")
 # ⚠️ 注意：「localhost:*」是 FastAPI CORSMiddleware 的 literal string（不支援 glob/wildcard），
 # 因此「http://localhost:*」不會匹配「http://localhost:8080」——這是安全默認行為。
 # Fix #8: 過濾空白字串，拒絕萬用字串 "*"（防止意外允許所有 origin）
-_origins_raw = os.environ.get("ALLOWED_ORIGINS", "http://localhost:*,http://10.0.2.2:*,http://127.0.0.1:*,http://35.238.60.31:*")
+_origins_raw = os.environ.get("ALLOWED_ORIGINS", "http://localhost:*,http://10.0.2.2:*,http://127.0.0.1:*")
 _allowed = [o.strip() for o in _origins_raw.split(",") if o.strip()]
 ALLOWED_ORIGINS = [o for o in _allowed if o != "*"]
 if not ALLOWED_ORIGINS:
@@ -130,14 +133,19 @@ def get_condition_engine():
     return condition_engine
 
 
+_qbs_instance: Optional[Any] = None
+
 def get_quotes_broadcast_service():
     """延遲初始化 QuotesBroadcastService（單例）"""
-    from quotes_broadcast_service import QuotesBroadcastService
-    qbs = QuotesBroadcastService()
-    qbs.set_ws_manager(get_ws_manager())
+    global _qbs_instance
+    if _qbs_instance is None:
+        from quotes_broadcast_service import QuotesBroadcastService
+        _qbs_instance = QuotesBroadcastService()
+        _qbs_instance.set_ws_manager(get_ws_manager())
+        logger.info("QuotesBroadcastService 單例已建立")
     if sdk:
-        qbs.set_sdk(sdk)
-    return qbs
+        _qbs_instance.set_sdk(sdk)
+    return _qbs_instance
 
 
 # ========== Data Models ==========
@@ -152,9 +160,11 @@ class AccountInfo:
 class LoginRequest(BaseModel):
     personal_id: str
     api_key: str
-    cert_path: Optional[str] = None
     cert_password: Optional[str] = None
-    cert_base64: Optional[str] = None  # base64-encoded .p12 cert content (preferred over cert_path)
+    # 新型：傳入 base64 編碼的憑證內容（Android client 使用這個）
+    cert_base64: Optional[str] = None
+    # 舊型：傳入檔案路徑（直接呼叫時使用）
+    cert_path: Optional[str] = None
 
 
 class LoginResponse:
@@ -265,9 +275,12 @@ class ConditionEvaluateRequest(BaseModel):
 
 # ========== SDK Login Framework ==========
 
-async def sdk_login(personal_id: str, api_key: str, cert_path: str, cert_password: Optional[str] = None) -> LoginResponse:
+async def sdk_login(personal_id: str, api_key: str, cert_path: Optional[str] = None, cert_password: Optional[str] = None, cert_base64: Optional[str] = None) -> LoginResponse:
     """
     使用 FubonSDK.apikey_login() 登入
+    cert_base64: base64 編碼的 .p12 檔案內容（Android client 使用）
+    cert_path: 檔案路徑（直接呼叫時使用）
+    兩者二選一，都沒有則不傳憑證。
     """
     global sdk, accounts_cache
 
@@ -280,10 +293,21 @@ async def sdk_login(personal_id: str, api_key: str, cert_path: str, cert_passwor
     try:
         sdk = FubonSDK()
         password = cert_password if cert_password else personal_id
+
+        # 處理憑證：優先使用 base64（Android），否則用檔案路徑
+        actual_cert_path = cert_path
+        if cert_base64:
+            import tempfile
+            import base64
+            with tempfile.NamedTemporaryFile(suffix='.p12', delete=False) as tmp:
+                tmp.write(base64.b64decode(cert_base64))
+                actual_cert_path = tmp.name
+            logger.info(f"已解碼 base64 憑證，暫存檔: {actual_cert_path}")
+
         # 登入時不輸出敏感資料，僅記錄「嘗試登入」事件
         masked_pid = personal_id[0] + "***" + personal_id[-2:] if len(personal_id) > 4 else "***"
-        logger.info(f"嘗試登入: personal_id={masked_pid}, api_key=***, cert_path={cert_path}")
-        result = sdk.apikey_login(personal_id, api_key, cert_path, password)
+        logger.info(f"嘗試登入: personal_id={masked_pid}, api_key=***, cert_path={actual_cert_path}")
+        result = sdk.apikey_login(personal_id, api_key, actual_cert_path, password)
         logger.info(f"登入結果: is_success={result.is_success}, message={result.message}")
 
         if not result.is_success:
@@ -332,6 +356,23 @@ async def sdk_login(personal_id: str, api_key: str, cert_path: str, cert_passwor
                 logger.info(f"Cached stock account: {getattr(acc, 'account', 'N/A')} branch: {getattr(acc, 'branch_no', 'N/A')}")
                 break
 
+        # 將 SDK 注入到 QuotesBroadcastService（讓報價廣播使用真實數據）
+        try:
+            # 初始化即時行情（行情查詢必要步驟）
+            if hasattr(sdk, 'init_realtime'):
+                sdk.init_realtime()
+                logger.info("SDK init_realtime() 完成，marketdata 已就緒")
+            elif hasattr(sdk, 'marketdata'):
+                logger.info("SDK 已有 marketdata")
+            else:
+                logger.warning("SDK 無 init_realtime() 方法，行情功能可能受限")
+
+            qbs = get_quotes_broadcast_service()
+            qbs.set_sdk(sdk)
+            logger.info("QuotesBroadcastService 已注入 SDK，股票/期貨報價將使用富邦 API 數據")
+        except Exception as e:
+            logger.warning(f"QuotesBroadcastService SDK 注入失敗: {e}")
+
         return LoginResponse(
             success=True,
             accounts=accounts,
@@ -358,32 +399,15 @@ async def health():
     return {"status": "healthy", "sdk_ready": sdk is not None}
 
 
-@app.post("/api/login")
+@app.post("/api/login", dependencies=[Depends(verify_api_key)])
 async def login(req: LoginRequest):
-    """Login endpoint - calls FubonSDK.apikey_login()
-    
-    ⚠️ 無 API Key 驗證（開放給已安裝 App 的用戶）
-    憑證可選：cert_base64（推荐，避免路徑不一致）
-    """
-    # 優先使用 base64 憑證，寫入 server-side 暫存檔
-    cert_server_path = None
-    if req.cert_base64:
-        try:
-            import base64, tempfile, os
-            cert_bytes = base64.b64decode(req.cert_base64)
-            fd, cert_server_path = tempfile.mkstemp(suffix=".p12", dir="/tmp")
-            os.write(fd, cert_bytes)
-            os.close(fd)
-            logger.info(f"Cert written to {cert_server_path}")
-        except Exception as e:
-            logger.error(f"Failed to decode cert_base64: {e}")
-            cert_server_path = None
-
+    """Login endpoint - calls FubonSDK.apikey_login()"""
     result = await sdk_login(
         personal_id=req.personal_id,
         api_key=req.api_key,
-        cert_path=cert_server_path or req.cert_path,
-        cert_password=req.cert_password
+        cert_path=req.cert_path,
+        cert_password=req.cert_password,
+        cert_base64=req.cert_base64
     )
     return result.to_dict()
 
@@ -1201,6 +1225,7 @@ async def websocket_endpoint(websocket: WebSocket):
     client_id = str(uuid.uuid4())[:12]
 
     # ── 步驟 1：等待第一筆訊息驗證 API Key ──────────────────────
+    await websocket.accept()
     try:
         first_data = await websocket.receive_text()
         try:
@@ -1256,13 +1281,19 @@ async def websocket_endpoint(websocket: WebSocket):
                     topics = msg.get("topics", [])
                     manager.subscribe(client_id, symbols=symbols, topics=topics)
 
-                    # 若有訂閱股票，註冊到 QuotesBroadcastService
-                    if symbols:
-                        qbs = get_quotes_broadcast_service()
-                        for sym in symbols:
-                            # 自動判斷是股票還是期貨
-                            prod_type = "futures" if sym.upper().startswith(("TXF", "MXF", "EXF", "FEF", "TXO")) else "stock"
-                            qbs.add_subscription(sym, product_type=prod_type)
+                    # 自動判斷是股票還是期貨
+                    qbs = get_quotes_broadcast_service()
+                    for sym in symbols:
+                        sym_upper = sym.upper()
+                        futures_prefixes = (
+                            "TXF", "MXF", "EXF", "FEF", "TXO",  # 標準期貨/選擇權
+                            "MTX", "MTQ", "TE",                 # 小型台指/電子/金融
+                            "F1F", "F2F",                        # 個股期
+                            "GCF", "ZEF",                        # 商品期
+                        )
+                        is_futures = any(sym_upper.startswith(p) for p in futures_prefixes)
+                        prod_type = "futures" if is_futures else "stock"
+                        qbs.add_subscription(sym, product_type=prod_type)
 
                     await websocket.send_json({
                         "event": "subscribed",
