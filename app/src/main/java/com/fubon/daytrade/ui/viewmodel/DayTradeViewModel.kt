@@ -558,6 +558,7 @@ class DayTradeViewModel @Inject constructor(
                     else -> TrackingPhase.Idle
                 },
                 conditionParams = ConditionParams(
+                    mode = mode,
                     lowPrice = lowPrice,
                     highPrice = highPrice,
                     reboundTicks = reboundTicks,
@@ -698,7 +699,11 @@ class DayTradeViewModel @Inject constructor(
                     symbol = symbol,
                     entryMode = if (side == "buy") "breakdown_buy" else "breakout_sell",
                     price = _uiState.value.currentQuote?.price ?: 0.0,
-                    quantity = quantity
+                    quantity = quantity,
+                    stopLossPct = stopLossPct.toFloat(),
+                    trackLevels = 0,
+                    productType = "DAYTRADE",
+                    tickSize = 0.01
                 )
                 result.fold(
                     onSuccess = {
