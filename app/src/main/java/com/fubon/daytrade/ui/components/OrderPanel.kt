@@ -103,6 +103,8 @@ fun OrderPanel(
     }
 
     val isTracking = trackingPhase != null && trackingPhase != TrackingPhase.Idle
+    val isPhase1 = trackingPhase == TrackingPhase.Phase1_Low_Set || trackingPhase == TrackingPhase.Phase1_High_Set
+    val isPhase2 = trackingPhase == TrackingPhase.Phase2_Rebound || trackingPhase == TrackingPhase.Phase2_Retrace
 
     Card(
         modifier = modifier.fillMaxWidth(),
@@ -177,65 +179,9 @@ fun OrderPanel(
                 )
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // Buy/Sell buttons
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Button(
-                    onClick = {
-                        val price = priceText.toDoubleOrNull()
-                        val quantity = quantityText.toIntOrNull()
-                        if (price != null && quantity != null && quantity > 0) {
-                            onBuy(price, quantity)
-                        }
-                    },
-                    modifier = Modifier.weight(1f),
-                    enabled = !isLoading && priceText.toDoubleOrNull() != null && quantityText.toIntOrNull()?.let { it > 0 } == true,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = LimitUpRed
-                    ),
-                    shape = RoundedCornerShape(8.dp)
-                ) {
-                    Text(
-                        text = if (isLoading) "處理中..." else "買入",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(vertical = 8.dp)
-                    )
-                }
-
-                Button(
-                    onClick = {
-                        val price = priceText.toDoubleOrNull()
-                        val quantity = quantityText.toIntOrNull()
-                        if (price != null && quantity != null && quantity > 0) {
-                            onSell(price, quantity)
-                        }
-                    },
-                    modifier = Modifier.weight(1f),
-                    enabled = !isLoading && priceText.toDoubleOrNull() != null && quantityText.toIntOrNull()?.let { it > 0 } == true,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = LimitDownBlue
-                    ),
-                    shape = RoundedCornerShape(8.dp)
-                ) {
-                    Text(
-                        text = if (isLoading) "處理中..." else "賣出",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(vertical = 8.dp)
-                    )
-                }
-            }
-
-            // ════════════════════════════════════════════════════════════
-            // 階段 2：條件追蹤中（Phase1 / Phase2）
-            // ════════════════════════════════════════════════════
+            // ══ 條件追蹤中（Phase1 / Phase2）══
             if (isTracking) {
-                // 追蹤中的說明
+                // 狀態卡
                 val (phaseText, phaseColor) = when (trackingPhase) {
                     TrackingPhase.Phase1_Low_Set ->
                         "📡 等待跌破低點 ${conditionParams?.lowPrice ?: "?"}..." to LimitUpRed
@@ -293,20 +239,55 @@ fun OrderPanel(
                     }
                 }
             } else {
-                // Quick quantity buttons
-                Spacer(modifier = Modifier.height(12.dp))
+                // 一般買入/賣出按鈕
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    listOf(1, 5, 10, 20).forEach { qty ->
-                        QuickQuantityButton(
-                            quantity = qty,
-                            onClick = { quantityText = qty.toString() },
-                            enabled = !isLoading,
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
+                    Button(
+                        onClick = {
+                            val price = priceText.toDoubleOrNull()
+                            val quantity = quantityText.toIntOrNull()
+                            if (price != null && quantity != null && quantity > 0) {
+                                onBuy(price, quantity)
+                            }
+                        },
+                        modifier = Modifier.weight(1f),
+                        enabled = !isLoading && priceText.toDoubleOrNull() != null && quantityText.toIntOrNull()?.let { it > 0 } == true,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = LimitUpRed
+                        ),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text(
+                            text = if (isLoading) "處理中..." else "買入",
+                            style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(vertical = 8.dp)
+                    )
+                }
+
+                Button(
+                    onClick = {
+                        val price = priceText.toDoubleOrNull()
+                        val quantity = quantityText.toIntOrNull()
+                        if (price != null && quantity != null && quantity > 0) {
+                            onSell(price, quantity)
+                        }
+                    },
+                    modifier = Modifier.weight(1f),
+                    enabled = !isLoading && priceText.toDoubleOrNull() != null && quantityText.toIntOrNull()?.let { it > 0 } == true,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = LimitDownBlue
+                    ),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text(
+                        text = if (isLoading) "處理中..." else "賣出",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(vertical = 8.dp)
+                    )
                 }
             }
         }
